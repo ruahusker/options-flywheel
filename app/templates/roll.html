@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Roll Decision - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head compact-head">
+  <div>
+    <h1>Friday Roll Decision</h1>
+    <p>Coverage, delta, DTE, and assignment plan for the current technical pattern.</p>
+  </div>
+</section>
+
+{% if not rows %}
+  <section class="empty">Upload positions before using the roll decision view.</section>
+{% else %}
+  <section class="roll-summary">
+    {% for row in rows %}
+      <article class="roll-card">
+        <div class="roll-card-head">
+          <div>
+            <h2>{{ row.symbol }}</h2>
+            <p>{{ row.posture.label }} setup at {{ row.quote_price|money }}</p>
+          </div>
+          <div class="decision-badge">{{ row.posture.coverage_pct|pct }} covered</div>
+        </div>
+
+        <div class="decision-line">
+          <span>Roll/reset trade <button class="info-tip" type="button" aria-label="The target trade if this symbol were reset to the recommended coverage sleeve. Existing calls are shown separately.">?</button></span>
+          <strong>{{ action_label(row.selected) }}</strong>
+        </div>
+
+        <div class="roll-fields">
+          <div>
+            <span>Selected delta <button class="info-tip" type="button" aria-label="Delta of the chosen call. Delta is picked by best risk-adjusted expected value across the whole chain, with an upside-preservation tilt — not constrained to a fixed band.">?</button></span>
+            <strong>{{ row.selected.delta|num }}</strong>
+          </div>
+          <div>
+            <span>DTE <button class="info-tip" type="button" aria-label="Days to expiration. The roll view prefers the next weekly expiration about 5 to 10 calendar days out.">?</button></span>
+            <strong>{{ row.chosen_dte or "-" }} days</strong>
+          </div>
+          <div>
+            <span>Credit <button class="info-tip" type="button" aria-label="Estimated total premium from the selected number of contracts, haircut toward the bid for a realistic sell fill.">?</button></span>
+            <strong>{{ row.selected.expected_credit|money }}</strong>
+          </div>
+          <div>
+            <span>Edge (IV vs RV) <button class="info-tip" type="button" aria-label="Variance risk premium: implied vol divided by the realized-vol forecast. Above 1.0 means the option is richly priced relative to expected movement, which is the edge in selling it.">?</button></span>
+            <strong class="{{ 'pos' if (row.selected.vrp_ratio or 0) > 1 else 'neg' }}">{% if row.selected.vrp_ratio is not none %}{{ "%.2f"|format(row.selected.vrp_ratio) }}&times;{% else %}-{% endif %}</strong>
+          </div>
+          <div>
+            <span>Expected value <button class="info-tip" type="button" aria-label="Premium collected minus the expected cost of being short under the realized-vol forecast. Positive expected value means selling is +EV.">?</button></span>
+            <strong class="{{ 'pos' if (row.selected.expected_value or 0) > 0 else 'neg' }}">{{ row.selected.expected_value|money }}</strong>
+          </div>
+          <div>
+            <span>IV rank <button class="info-tip" type="button" aria-label="Where current implied vol sits in its own trailing range. High rank means options are unusually expensive. Builds after about 20 daily observations.">?</button></span>
+            <strong>{% if row.selected.iv_rank is not none %}{{ row.selected.iv_rank|pct }}{% else %}building&hellip;{% endif %}</strong>
+          </div>
+          <div>
+            <span>Breakeven <button class="info-tip" type="button" aria-label="Underlying price below which the covered position trails simply holding the shares.">?</button></span>
+            <strong>{{ row.selected.breakeven|money }}</strong>
+          </div>
+          <div>
+            <span>Profit prob. <button class="info-tip" type="button" aria-label="Risk-neutral probability (N(d2)-based) that the underlying finishes above breakeven, i.e. the covered call beats just holding.">?</button></span>
+            <strong>{% if row.selected.profit_probability is not none %}{{ row.selected.profit_probability|pct }}{% else %}-{% endif %}</strong>
+          </div>
+        </div>
+
+        {% if row.offband_delta_note %}
+          <p class="notice offband-note">{{ row.offband_delta_note }}</p>
+        {% endif %}
+
+        <p class="decision-reason">{{ row.posture.reason }}</p>
+
+        {% if row.backtest_hint %}
+          <div class="current-state backtest-state">
+            <div>
+              <span>Backtest read <button class="info-tip" type="button" aria-label="Historical option-bar result for the current technical regime. It can nudge coverage, delta, and DTE only when enough matching samples show a clear edge over the static rule.">?</button></span>
+              <strong>{{ row.backtest_hint.status_label }}</strong>
+            </div>
+            <div>
+              <span>Regime sample <button class="info-tip" type="button" aria-label="Current regime matched first; if too few samples exist, the read falls back to all cached regimes and is lower confidence.">?</button></span>
+              <strong>{{ row.backtest_hint.matched_regime }} / {{ row.backtest_hint.samples }} samples</strong>
+            </div>
+            {% if row.backtest_hint.best %}
+              <div>
+                <span>Historical pick <button class="info-tip" type="button" aria-label="Best historical sleeve by premium, net-vs-hold, upside-give-up, assignment rate, and sample quality.">?</button></span>
+                <strong>{{ row.backtest_hint.best.coverage_pct|pct }} / {{ row.backtest_hint.best.delta_min|pct }}-{{ row.backtest_hint.best.delta_max|pct }} / {{ row.backtest_hint.best.dte_min }}-{{ row.backtest_hint.best.dte_max }} DTE</strong>
+              </div>
+              <div>
+                <span>Net vs hold <button class="info-tip" type="button" aria-label="Average historical covered-call result versus simply holding those shares through expiration, scaled by the selected coverage sleeve.">?</button></span>
+                <strong>{{ row.backtest_hint.best.avg_net_vs_hold_pct|pct }}</strong>
+              </div>
+            {% endif %}
+          </div>
+          <p class="decision-reason">{{ row.backtest_hint.reason }}</p>
+        {% endif %}
+
+        <div class="current-state">
+          <div>
+            <span>Current covered <button class="info-tip" type="button" aria-label="How much of this symbol is already covered by imported short calls. If this is above the target, adding more calls is usually unnecessary.">?</button></span>
+            <strong>{{ row.current_covered_pct|pct }} / {{ row.existing_short_calls }} calls</strong>
+          </div>
+          <div>
+            <span>Current add-on</span>
+            <strong>{{ row.current_add_on.action }}</strong>
+          </div>
+          <div>
+            <span>Technical pattern <button class="info-tip" type="button" aria-label="Current trend classification from price, moving averages, RSI, MACD, and recent high/low context.">?</button></span>
+            <strong>{{ row.trend_state }}</strong>
+          </div>
+          <div>
+            <span>RSI <button class="info-tip" type="button" aria-label="14-period relative strength index. Over 70 is extended; under 35 is washed out in this app's roll logic.">?</button></span>
+            <strong>{{ row.rsi_14|num }}</strong>
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+
+  <section>
+    <h2>By Account</h2>
+    <div class="simple-table">
+      <table>
+        <thead>
+          <tr>
+            <th data-help="Fidelity account from the positions import, or from journal lot notes for older imports.">Account</th>
+            <th data-help="Underlying being evaluated.">Symbol</th>
+            <th data-help="Shares in this account when account-level holdings are available. A dash means the older import did not keep row-level account fields.">Shares</th>
+            <th data-help="Active short calls currently imported for this account and underlying.">Active short calls</th>
+            <th data-help="Long calls currently imported for this account and underlying.">Long calls</th>
+            <th data-help="Recommended number of covered-call contracts for this account if resetting to the selected sleeve.">Target calls</th>
+            <th data-help="Action relative to the active imported short calls.">Action</th>
+            <th data-help="Recommended strike for the reset trade.">Strike</th>
+            <th data-help="Option expiration selected by the roll engine.">Expiration</th>
+            <th data-help="Selected option delta.">Delta</th>
+            <th data-help="Estimated premium for this account's target reset contracts.">Target credit</th>
+            <th data-help="Whether the split came from exact account-level positions or was inferred from journal lots.">Basis</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account_row in account_rows %}
+            <tr>
+              <td>{{ account_row.account.label }}</td>
+              <td>{{ account_row.symbol }}</td>
+              <td>{{ account_row.shares|num if account_row.shares is not none else "-" }}</td>
+              <td>{{ account_row.current_short_calls }}</td>
+              <td>{{ account_row.current_long_calls }}</td>
+              <td>{{ account_row.target_call_contracts }}</td>
+              <td>{{ account_row.action }}</td>
+              <td>{{ account_row.strike|money }}</td>
+              <td>{{ account_row.expiration or "-" }}</td>
+              <td>{{ account_row.delta|num }}</td>
+              <td>{{ account_row.target_credit|money }}</td>
+              <td>{{ account_row.basis }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Coverage Choices</h2>
+    <div class="simple-table">
+      <table>
+        <thead>
+          <tr>
+          <th data-help="Underlying being evaluated.">Symbol</th>
+            <th>Coverage <button class="info-tip" type="button" aria-label="Percent of shares targeted for covered calls. The rest remains uncapped for upside.">?</button></th>
+            <th data-help="Number of contracts for that coverage sleeve.">Contracts</th>
+            <th data-help="Best rule-based action for this coverage level.">Action</th>
+            <th data-help="Option strike selected by the optimizer.">Strike</th>
+            <th data-help="Option delta; lower call delta keeps more upside, higher delta usually pays more.">Delta</th>
+            <th data-help="Estimated total premium for this sleeve.">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% for sleeve in row.sleeve_rows %}
+              <tr {% if sleeve.coverage_pct == row.posture.coverage_pct %}class="selected-row"{% endif %}>
+                <td>{{ row.symbol }}</td>
+                <td>{{ sleeve.coverage_pct|pct }}</td>
+                <td>{{ sleeve.contracts }}</td>
+                <td>{{ sleeve.action }}</td>
+                <td>{{ sleeve.strike|money }}</td>
+                <td>{{ sleeve.delta|num }}</td>
+                <td>{{ sleeve.credit|money }}</td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="split">
+    <div>
+      <h2>If Assigned</h2>
+      <table>
+        <thead><tr><th data-help="Underlying that could be assigned.">Symbol</th><th data-help="Cash-secured put re-entry action after assignment.">Put action</th><th data-help="Put strike used for re-entry.">Strike</th><th data-help="Put delta; used as a rough assignment probability proxy.">Delta</th><th data-help="Estimated put premium.">Credit</th><th data-help="Cash required to secure the put contracts.">Collateral</th></tr></thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>{{ row.symbol }}</td>
+              <td>{{ row.put_reentry.action if row.put_reentry else "-" }}</td>
+              <td>{{ row.put_reentry.strike|money if row.put_reentry else "-" }}</td>
+              <td>{{ row.put_reentry.delta|num if row.put_reentry else "-" }}</td>
+              <td>{{ row.put_reentry.expected_credit|money if row.put_reentry else "-" }}</td>
+              <td>{{ row.put_reentry.collateral_required|money if row.put_reentry else "-" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div>
+      <h2>Historical Data Status</h2>
+      {% if readiness %}
+        <div class="status-list">
+          <div><span data-help="Strategy-relevant option contracts still waiting for historical bars.">Focused contracts left</span><strong>{{ readiness.focused_remaining_total }}</strong></div>
+          <div><span data-help="Estimated time to fill focused historical option bars at the current timer pace.">Estimated fill</span><strong>{{ readiness.estimated_days_for_focused_options|num }} days</strong></div>
+          <div><span data-help="Whether the historical data is ready enough to trust backtest-informed recommendations.">Read</span><strong>{{ readiness.recommendation }}</strong></div>
+        </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="notice">
+    Contract selection is rule-based. AI is best used to explain the decision or answer follow-up questions, not to override the sizing, delta, DTE, liquidity, and backtest guardrails.
+  </section>
+{% endif %}
+{% endblock %}

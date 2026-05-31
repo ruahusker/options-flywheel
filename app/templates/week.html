@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}This Week - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head cockpit-head">
+  <div>
+    <h1>This Week</h1>
+    <p>Your weekly read on the ASST / IBIT / SATA flywheel: the verdict, why it holds up, the exact trade, and where the premium goes.</p>
+  </div>
+  <div class="actions">
+    <a class="button secondary" href="{{ base_path }}/roll">Roll detail</a>
+    <a class="button secondary" href="{{ base_path }}/portfolio">Portfolio</a>
+  </div>
+</section>
+
+{% if not snapshot %}
+  <section class="empty">No portfolio snapshot has been imported yet. <a href="{{ base_path }}/uploads">Upload positions</a> to begin.</section>
+{% else %}
+  <section class="verdict-grid">
+    {% for row in rows %}
+      {% set v = week_verdict(row) %}
+      {% set c = row.selected %}
+      <article class="verdict-card verdict--{{ v.tone }}">
+        <header class="verdict-card-head">
+          <div class="vc-symbol">
+            <h2>{{ row.symbol }}</h2>
+            <span class="vc-price">{{ row.quote_price|money }}</span>
+          </div>
+          <div class="vc-verdict">
+            <span class="verdict-tag">{{ v.headline }}</span>
+            <span class="edge-chip edge--{{ v.edge_tone }}">{{ v.edge_label }}</span>
+          </div>
+        </header>
+
+        <p class="vc-setup">{{ row.posture.label }} · {{ row.trend_state }} · RSI {{ row.rsi_14|num(0) }}</p>
+
+        <div class="vc-coverage" data-help="Calls you already hold against this symbol versus the target coverage for the current read. Over the target means your near-term upside is already sold.">
+          <span>Covered now</span>
+          <strong>{{ row.existing_short_calls }} calls · {{ row.current_covered_pct|pct }} of shares</strong>
+          <em>target {{ row.posture.coverage_pct|pct }}</em>
+        </div>
+
+        {# ---- THIS WEEK: what to actually do given existing coverage ---- #}
+        <div class="vc-block">
+          <span class="vc-block-label">This week</span>
+          {% if row.current_add_on.action != "skip trade" %}
+            <div class="vc-trade" data-help="Incremental trade to bring you up to the target sleeve, after counting calls you already hold.">
+              {{ action_label(row.current_add_on) }}
+              <span class="vc-credit">{{ row.current_add_on.expected_credit|money }} credit</span>
+            </div>
+          {% elif row.existing_short_calls > 0 %}
+            <p class="vc-hold">No new calls. You already hold <strong>{{ row.existing_short_calls }}</strong> calls ({{ row.current_covered_pct|pct }} vs {{ row.posture.coverage_pct|pct }} target) — your near-term upside is sold. Hold them to expiration; don't add more this week.</p>
+          {% else %}
+            <p class="vc-hold">Nothing to add — no qualifying covered call cleared the rules this week.</p>
+          {% endif %}
+        </div>
+
+        {# ---- NEXT RESET: the target sleeve to re-establish when current calls expire ---- #}
+        <div class="vc-block">
+          <span class="vc-block-label">When you roll
+            {% if row.current_call_expiry %}<em>· after your {{ row.current_call_expiry }} calls expire{% if row.reset_expiration %} (target {{ row.reset_expiration }}){% endif %}</em>
+            {% else %}· target sleeve{% endif %}</span>
+          {% if c.action != "skip trade" %}
+            <div class="vc-trade" data-help="The full target sleeve to re-establish at the target coverage. Priced off this week's liquid chain as an estimate; the exact strike and credit firm up when you actually roll.">
+              Sell {{ c.contracts }} call{{ '' if c.contracts == 1 else 's' }} near {{ c.strike|money }} · {{ c.delta|num }} delta
+              <span class="vc-credit">~{{ c.expected_credit|money }} credit{% if row.current_call_expiry %} · est. from this week's chain, firms at roll{% endif %}</span>
+            </div>
+            <div class="why-grid">
+              <div data-help="Variance risk premium: implied vol relative to the realized-vol forecast. Above 1.0 means the option is richly priced — the edge in selling it.">
+                <span>IV vs realized</span>
+                <strong>{% if c.vrp_ratio is not none %}{{ "%.2f"|format(c.vrp_ratio) }}&times;{% else %}-{% endif %}<small>RV {{ c.forecast_vol|pct }}</small></strong>
+              </div>
+              <div data-help="Expected value of selling this option = premium collected minus the expected cost of being short, under the realized-vol forecast. Positive is +EV.">
+                <span>Expected value</span>
+                <strong class="{{ 'pos' if (c.expected_value or 0) > 0 else 'neg' }}">{{ c.expected_value|money }}</strong>
+              </div>
+              <div data-help="Where today's implied vol sits in its own trailing range. High rank = options unusually expensive. Builds after ~20 daily observations.">
+                <span>IV rank</span>
+                <strong>{% if c.iv_rank is not none %}{{ c.iv_rank|pct }}{% else %}building&hellip;{% endif %}</strong>
+              </div>
+              <div data-help="Underlying price below which the covered position trails simply holding the shares.">
+                <span>Breakeven</span>
+                <strong>{{ c.breakeven|money }}</strong>
+              </div>
+              <div data-help="Risk-neutral probability the underlying finishes above breakeven (N(d2)-based), i.e. the covered call beats just holding.">
+                <span>Profit prob.</span>
+                <strong>{% if c.profit_probability is not none %}{{ c.profit_probability|pct }}{% else %}-{% endif %}</strong>
+              </div>
+              <div data-help="Risk-neutral chance the short call finishes in the money and is assigned. For a covered call, assignment is the max-profit outcome.">
+                <span>Assignment</span>
+                <strong>{{ c.assignment_probability_proxy|pct }}</strong>
+              </div>
+            </div>
+          {% else %}
+            <div class="vc-trade vc-trade--skip" data-help="No call at any delta on the nearest weekly cleared the expected-value and liquidity rules, so selling isn't worth it right now.">
+              {% if row.chosen_dte is not none %}
+                No call at any delta on the {{ row.chosen_dte }}-day weekly cleared the expected-value and liquidity rules — premium didn't justify the risk. Re-check live during market hours.
+              {% else %}
+                No expiration within 7 days right now.
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+
+        <p class="vc-reason">{{ row.posture.reason }}</p>
+        {% if c.warnings %}<p class="vc-warn">{{ c.warnings|join("; ") }}</p>{% endif %}
+
+        <div class="vc-explain">
+          <form hx-post="{{ base_path }}/week/explain" hx-target="#explain-{{ row.symbol }}" hx-swap="innerHTML" hx-indicator="#explain-loading-{{ row.symbol }}" class="inline-form">
+            <input type="hidden" name="symbol" value="{{ row.symbol }}">
+            <button type="submit" class="link-button">
+              <span class="button-idle">Explain this decision &#9656;</span>
+              <span class="button-busy">Thinking&hellip;</span>
+            </button>
+            <span id="explain-loading-{{ row.symbol }}" class="inline-loading htmx-indicator" aria-live="polite"><span class="spinner small"></span></span>
+          </form>
+          <div id="explain-{{ row.symbol }}" class="explain-target"></div>
+        </div>
+      </article>
+    {% else %}
+      <section class="empty">No IBIT or ASST shares found in the latest import.</section>
+    {% endfor %}
+  </section>
+
+  <section class="routing-strip">
+    <div class="routing-head">
+      <h2>Premium routing</h2>
+      <p data-help="Rule-based split of the recurring weekly premium from rolling the target sleeve. SATA is the income anchor (daily 13% in your IRA); IBIT/ASST get a slice only when the setup supports reinvesting for upside.">{{ premium_allocation.summary }}</p>
+    </div>
+    <div class="routing-metrics">
+      <div><span data-help="Recurring weekly premium from rolling the target sleeve on the nearest liquid weekly. Drives the SATA projection — it does not drop to $0 just because you are already covered this week.">Weekly premium (target sleeve)</span><strong>{{ premium_allocation.weekly_premium|money }}</strong></div>
+      <div><span>&rarr; SATA</span><strong>{{ premium_allocation.amount_for("SATA")|money }}</strong></div>
+      <div><span>&rarr; IBIT / ASST</span><strong>{{ (premium_allocation.amount_for("IBIT") + premium_allocation.amount_for("ASST"))|money }}</strong></div>
+      <div><span>Annualized pace</span><strong>{{ metrics.estimated_annual_premium|money }}</strong></div>
+    </div>
+    <div class="routing-projection">
+      <span class="rp-label" data-help="SATA income sleeve projected with daily-compounding DRIP at the configured rate, tax-free in your IRA.">SATA with DRIP</span>
+      {% for projection in projections %}
+        <div class="rp-item"><span>{{ projection.years }}y</span><strong>{{ projection.ending_value|money }}</strong></div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="ask-section">
+    <h2>Ask a follow-up</h2>
+    <p class="ask-sub">One assistant, tied to this week's context. It explains and answers — the rules above make the call.</p>
+    <form hx-post="{{ base_path }}/week/ask" hx-target="#ask-output" hx-swap="innerHTML" hx-indicator="#ask-loading" class="question-form">
+      <label class="wide">
+        <textarea name="question" rows="3" placeholder="e.g. Why 30-delta and not 40? Should I keep ASST uncapped this week? How does this week's premium change my 5-year SATA?" required></textarea>
+      </label>
+      <button type="submit">
+        <span class="button-idle">Ask</span>
+        <span class="button-busy">Asking&hellip;</span>
+      </button>
+      <div id="ask-loading" class="loading-note htmx-indicator" aria-live="polite"><span class="spinner"></span> Reading the current portfolio, chain, indicators, and SATA projection.</div>
+    </form>
+    <div id="ask-output" class="ai-review-target"></div>
+  </section>
+{% endif %}
+{% endblock %}

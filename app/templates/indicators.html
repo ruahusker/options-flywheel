@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Technical Indicators - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Technical Indicators</h1>
+    <p>Trend state and option aggressiveness bias for IBIT and ASST.</p>
+  </div>
+  <a class="button secondary" href="{{ base_path }}/indicators">Refresh Indicators</a>
+</section>
+
+<section>
+  <table>
+    <thead><tr><th>Symbol</th><th>Price</th><th>SMA 5</th><th>SMA 20</th><th>SMA 50</th><th>EMA 8</th><th>EMA 21</th><th>RSI 14</th><th>MACD</th><th>ATR</th><th>RV 20</th><th>Trend</th><th>Bias</th></tr></thead>
+    <tbody>
+      {% for row in results %}
+        <tr>
+          <td>{{ row.symbol }}</td>
+          <td>{{ row.price|money }}</td>
+          <td>{{ row.sma_5|money }}</td>
+          <td>{{ row.sma_20|money }}</td>
+          <td>{{ row.sma_50|money }}</td>
+          <td>{{ row.ema_8|money }}</td>
+          <td>{{ row.ema_21|money }}</td>
+          <td>{{ row.rsi_14|num }}</td>
+          <td>{{ row.macd_line|num }}</td>
+          <td>{{ row.atr_14|num }}</td>
+          <td>{{ row.realized_vol_20|pct }}</td>
+          <td>{{ row.trend_state }}</td>
+          <td>{{ row.recommendation_bias }}</td>
+        </tr>
+        {% if row.warnings %}
+          <tr class="subrow"><td colspan="13">{{ row.warnings|join("; ") }}</td></tr>
+        {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

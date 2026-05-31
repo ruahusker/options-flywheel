@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Live Data - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Live Data</h1>
+    <p>Provider-normalized quotes, expirations, and option chain data.</p>
+  </div>
+  <form method="get" class="form-row compact">
+    <label>Symbol <input name="symbol" value="{{ symbol }}"></label>
+    <button type="submit">Refresh Quotes</button>
+  </form>
+</section>
+
+<section class="metric-grid">
+  <div><span>Provider</span><strong>{{ status.provider }}</strong></div>
+  <div><span>Market status</span><strong>{{ status.status }}</strong></div>
+  <div><span>Timestamp</span><strong>{{ status.timestamp }}</strong></div>
+  <div><span>Quote</span><strong>{% if quote %}{{ quote.price|money }}{% else %}-{% endif %}</strong></div>
+</section>
+
+<section>
+  <h2>Expirations</h2>
+  <div class="pill-row">
+    {% for exp in expirations %}
+      <a class="pill" href="{{ base_path }}/live-data?symbol={{ symbol }}&expiration={{ exp }}">{{ exp }}</a>
+    {% endfor %}
+  </div>
+</section>
+
+<section>
+  <h2>Option Chain</h2>
+  <table>
+    <thead><tr><th>Type</th><th>Strike</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Delta</th><th>IV</th><th>Volume</th><th>OI</th><th>Liquidity</th><th>Warnings</th></tr></thead>
+    <tbody>
+      {% for option in chain %}
+        <tr>
+          <td>{{ option.option_type }}</td>
+          <td>{{ option.strike|money }}</td>
+          <td>{{ option.bid|money }}</td>
+          <td>{{ option.ask|money }}</td>
+          <td>{{ option.mid|money }}</td>
+          <td>{{ option.delta|num }}</td>
+          <td>{{ option.implied_volatility|pct }}</td>
+          <td>{{ option.volume }}</td>
+          <td>{{ option.open_interest }}</td>
+          <td>{{ option.liquidity_score|num }}</td>
+          <td>{{ option.warnings|join("; ") }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="11">No chain available.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

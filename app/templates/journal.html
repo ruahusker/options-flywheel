@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Trade Journal - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Trade Journal</h1>
+    <p>Manually record option trades, assignments, rolls, SATA contributions, and buy-and-hold comparison.</p>
+  </div>
+</section>
+
+<section>
+  <form method="post" class="settings-grid">
+    <label data-help="Underlying ticker or security symbol for the journal entry.">Ticker <input name="ticker" required></label>
+    <label data-help="Optional strategy label, such as covered call, roll, assignment, or SATA contribution.">Strategy <input name="strategy"></label>
+    <label data-help="What happened: sell call, buy to close, roll, assigned, sell put, buy shares, etc.">Action <input name="action" required></label>
+    <label data-help="Number of option contracts involved. Use 0 for stock/SATA/cash-only entries.">Contracts <input type="number" name="contracts" value="0"></label>
+    <label data-help="Option strike price, if applicable.">Strike <input type="number" step="0.01" name="strike"></label>
+    <label data-help="Option expiration date, if applicable.">Expiration <input type="date" name="expiration"></label>
+    <label data-help="Net credit is positive; net debit is negative.">Credit/debit <input type="number" step="0.01" name="credit_debit"></label>
+    <label data-help="Amount of premium or cash routed into SATA.">SATA contribution <input type="number" step="0.01" name="sata_contribution"></label>
+    <label class="wide" data-help="Free-form notes for fill price, reason, or brokerage confirmation.">Notes <input name="notes"></label>
+    <button type="submit">Add Entry</button>
+  </form>
+</section>
+
+<section>
+  <table>
+    <thead><tr><th data-help="When the entry was recorded or imported.">Date</th><th data-help="Ticker or underlying.">Ticker</th><th data-help="Strategy label.">Strategy</th><th data-help="Trade or account action.">Action</th><th data-help="Option contract count.">Contracts</th><th data-help="Option strike.">Strike</th><th data-help="Option expiration.">Expiration</th><th data-help="Positive for credit, negative for debit.">Credit/debit</th><th data-help="Amount routed to SATA.">SATA</th><th data-help="Imported or manual notes.">Notes</th></tr></thead>
+    <tbody>
+      {% for entry in entries %}
+        <tr>
+          <td>{{ entry.created_at }}</td>
+          <td>{{ entry.ticker }}</td>
+          <td>{{ entry.strategy }}</td>
+          <td>{{ entry.action }}</td>
+          <td>{{ entry.contracts }}</td>
+          <td>{{ entry.strike|money }}</td>
+          <td>{{ entry.expiration or "" }}</td>
+          <td>{{ entry.credit_debit|money }}</td>
+          <td>{{ entry.sata_contribution|money }}</td>
+          <td>{{ entry.notes }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="10">No journal entries yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

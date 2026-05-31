@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Backtest - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Historical Backtest</h1>
+    <p>Massive cache coverage, technical-regime coverage, and focused option-bar build status.</p>
+  </div>
+</section>
+
+<section class="metric-grid">
+  <div><span data-help="Strategy-relevant option contracts still waiting for historical OHLCV bars.">Focused option contracts remaining</span><strong>{{ readiness.focused_remaining_total }}</strong></div>
+  <div><span data-help="Approximate daily Massive call capacity from the active timer settings.">Backfill pace</span><strong>{{ readiness.calls_per_day }} calls/day</strong></div>
+  <div><span data-help="Estimated time to finish the focused contract set, not every possible option strike.">Estimated focused fill time</span><strong>{{ readiness.estimated_days_for_focused_options|num }} days</strong></div>
+  <div><span data-help="Whether the local historical data is ready enough to trust backtest-informed signals.">Current read</span><strong class="metric-text">{{ readiness.recommendation }}</strong></div>
+</section>
+
+<section>
+  <h2>Cache Coverage</h2>
+  <table>
+    <thead>
+      <tr>
+        <th data-help="Underlying ticker.">Symbol</th>
+        <th data-help="Daily underlying price bars cached from Massive.">Underlying bars</th>
+        <th data-help="Date range covered by the cached underlying bars.">Underlying range</th>
+        <th data-help="Option contract metadata rows cached locally.">Contracts</th>
+        <th data-help="Expiration range covered by cached contract metadata.">Expiration range</th>
+        <th data-help="Distinct option contracts with historical option bars cached.">Contracts with bars</th>
+        <th data-help="Historical option OHLCV rows cached locally.">Option bars</th>
+        <th data-help="Contracts already attempted for option-bar fetches.">Attempts</th>
+        <th data-help="Focused contracts still needing option bars.">Focused remaining</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in readiness.rows %}
+        <tr>
+          <td>{{ row.symbol }}</td>
+          <td>{{ row.underlying_bars }}</td>
+          <td>{{ row.underlying_start or "-" }} to {{ row.underlying_end or "-" }}</td>
+          <td>{{ row.contracts }}</td>
+          <td>{{ row.contract_start or "-" }} to {{ row.contract_end or "-" }}</td>
+          <td>{{ row.option_contracts_with_bars }}</td>
+          <td>{{ row.option_bars }}</td>
+          <td>{{ row.attempted_contracts }}</td>
+          <td>{{ row.focused_remaining }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Technical Regime Coverage</h2>
+  <table>
+    <thead>
+      <tr>
+        <th data-help="Underlying ticker.">Symbol</th>
+        <th data-help="Underlying daily bars used for regime counts.">Bars</th>
+        <th data-help="Most recent cached close.">Latest close</th>
+        <th data-help="Most recent calculated 14-period RSI from cached underlying bars.">Latest RSI</th>
+        <th data-help="Days classified as extended/overbought.">Overbought</th>
+        <th data-help="Days classified as washed out/oversold.">Oversold</th>
+        <th data-help="Days with bullish trend characteristics.">Bullish</th>
+        <th data-help="Days with bearish trend characteristics.">Bearish</th>
+        <th data-help="Days that were neither clearly bullish nor bearish.">Neutral</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in readiness.regimes %}
+        <tr>
+          <td>{{ row.symbol }}</td>
+          <td>{{ row.bars }}</td>
+          <td>{{ row.latest_close|money }}</td>
+          <td>{{ row.latest_rsi_14|num }}</td>
+          <td>{{ row.overbought_days }}</td>
+          <td>{{ row.oversold_days }}</td>
+          <td>{{ row.bullish_days }}</td>
+          <td>{{ row.bearish_days }}</td>
+          <td>{{ row.neutral_days }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2>Next Focused Contracts</h2>
+  <table>
+    <thead>
+      <tr><th data-help="Underlying ticker.">Underlying</th><th data-help="Massive option contract symbol.">Option</th><th data-help="Call or put.">Type</th><th data-help="Option expiration date.">Expiration</th><th data-help="Option strike price.">Strike</th><th data-help="Latest date through which bars have been fetched for this contract.">Fetched through</th></tr>
+    </thead>
+    <tbody>
+      {% for contract in preview %}
+        <tr>
+          <td>{{ contract.underlying }}</td>
+          <td>{{ contract.provider_symbol }}</td>
+          <td>{{ contract.option_type }}</td>
+          <td>{{ contract.expiration }}</td>
+          <td>{{ contract.strike|money }}</td>
+          <td>{{ contract.bars_fetched_through or "-" }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6">No focused contracts are waiting in the currently cached contract set.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="notice">
+  Focused backfill prioritizes 7-21 DTE contracts near the covered-call and cash-secured-put moneyness bands. This is the fastest path to useful sleeve comparisons without caching every deep out-of-the-money strike.
+</section>
+{% endblock %}

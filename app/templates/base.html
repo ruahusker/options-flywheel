@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Options Flywheel{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="{{ base_path }}/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="{{ base_path }}/">&#9670; Flywheel</a>
+    <nav>
+      <div class="nav-group">
+        <span class="nav-label">Decide</span>
+        <a href="{{ base_path }}/" data-help="Your weekly cockpit: per-symbol verdict, the supporting edge, the exact trade, premium routing, and the single Explain & Ask assistant.">This Week</a>
+        <a href="{{ base_path }}/roll" data-help="Deep dive on the roll: coverage sleeve, selected delta, DTE, per-account trades, coverage choices, and assignment re-entry plan.">Roll Decision</a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-label">Analyze</span>
+        <a href="{{ base_path }}/optimizer" data-help="Full deterministic candidate ranking with expected value, IV-vs-realized edge, IV rank, breakeven, and profit probability.">Optimizer</a>
+        <a href="{{ base_path }}/indicators" data-help="Trend state and option-aggressiveness bias for IBIT and ASST.">Indicators</a>
+        <a href="{{ base_path }}/scenarios" data-help="Strategy value vs buy-and-hold under bearish, flat, moderate-bull, and heavy-bull paths.">Scenarios</a>
+        <a href="{{ base_path }}/monte-carlo" data-help="Weekly wheel-state simulation with assignment, cash drag, SATA compounding, and buy-and-hold comparison.">Monte Carlo</a>
+        <a href="{{ base_path }}/backtest" data-help="Massive historical-data coverage and readiness for strategy backtests.">Backtest</a>
+        <a href="{{ base_path }}/live-data" data-help="Provider-normalized quotes, expirations, and option-chain data.">Live Data</a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-label">Account</span>
+        <a href="{{ base_path }}/portfolio" data-help="Full portfolio snapshot, exposure, premium-by-account split, SATA projection, and the Friday roll snapshot.">Portfolio</a>
+        <a href="{{ base_path }}/journal" data-help="Recorded trades, assignments, rolls, and SATA contributions imported or entered manually.">Trade Journal</a>
+        <a href="{{ base_path }}/uploads" data-help="Import Fidelity positions or account history so portfolio state and journal entries stay current.">Uploads</a>
+        <a href="{{ base_path }}/settings" data-help="SATA projection assumptions and account modeling defaults.">Settings</a>
+      </div>
+    </nav>
+  </header>
+  <main>
+    {% if warnings %}
+      <section class="warnings">
+        {% for warning in warnings %}
+          <div>{{ warning }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+    {% if message %}
+      <section class="message">{{ message }}</section>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ base_path }}/static/app.js"></script>
+</body>
+</html>

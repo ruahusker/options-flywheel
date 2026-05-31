@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Scenarios - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Scenario Analyzer</h1>
+    <p>Compare strategy value against buy-and-hold under bearish, flat, moderate bull, and heavy bull paths.</p>
+  </div>
+</section>
+
+<section>
+  <form method="post" class="form-row">
+    <label>Optioned sleeve <input type="number" step="0.01" name="optioned_pct" value="{{ optioned_pct }}"></label>
+    <label>Expected weekly premium <input type="number" step="1" name="expected_weekly_premium" value="{{ expected_weekly_premium }}"></label>
+    <button type="submit">Run Scenarios</button>
+  </form>
+</section>
+
+<section>
+  <table>
+    <thead><tr><th>Scenario</th><th>Years</th><th>Return</th><th>B&H value</th><th>Strategy value</th><th>SATA sidecar</th><th>Premium</th><th>Lost upside</th><th>Cash drag</th><th>Vs B&H</th><th>Vs start</th><th>Upside capture</th><th>Warning</th></tr></thead>
+    <tbody>
+      {% for row in results %}
+        <tr class="{% if row.net_vs_buy_hold < 0 %}negative{% else %}positive{% endif %}">
+          <td>{{ row.name }}</td>
+          <td>{{ row.years }}</td>
+          <td>{{ row.scenario_return|pct }}</td>
+          <td>{{ row.buy_hold_value|money }}</td>
+          <td>{{ row.strategy_value|money }}</td>
+          <td>{{ row.sata_sidecar_value|money }}</td>
+          <td>{{ row.premium_collected|money }}</td>
+          <td>{{ row.lost_upside|money }}</td>
+          <td>{{ row.cash_drag_effect|money }}</td>
+          <td>{{ row.net_vs_buy_hold|money }}</td>
+          <td>{{ row.gain_vs_starting_capital|money }}</td>
+          <td>{{ row.upside_capture_ratio|pct }}</td>
+          <td>{{ row.warning or "" }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="13">No scenario results yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

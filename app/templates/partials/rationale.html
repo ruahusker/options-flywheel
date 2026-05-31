@@ -1,0 +1,14 @@
+<div class="rationale-panel">
+  <div class="rationale-head">
+    <strong>{{ rationale.symbol }} rationale</strong>
+    <span>{{ rationale.provider }}{% if rationale.model %} · {{ rationale.model }}{% endif %}</span>
+  </div>
+  {% if rationale.warnings %}
+    <div class="inline-warnings">
+      {% for warning in rationale.warnings %}
+        <div>{{ warning }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+  <pre>{{ rationale.text }}</pre>
+</div>

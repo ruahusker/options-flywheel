@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Settings - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p>SATA assumptions, DRIP mode, and account modeling defaults.</p>
+  </div>
+</section>
+
+<section>
+  <form method="post" class="settings-grid">
+    <label data-help="Annual yield assumption used for SATA projection math. This is not guaranteed income.">Annual SATA dividend assumption <input type="number" step="0.001" name="annual_dividend_rate" value="{{ settings.annual_dividend_rate }}"></label>
+    <label data-help="How the projection compounds the assumed SATA income stream.">Compounding mode
+      <select name="compounding_mode">
+        <option value="daily" {% if settings.compounding_mode == "daily" %}selected{% endif %}>daily</option>
+        <option value="business_day" {% if settings.compounding_mode == "business_day" %}selected{% endif %}>business day</option>
+      </select>
+    </label>
+    <label data-help="Assumed SATA share price used when modeling reinvestment.">Assumed SATA price <input type="number" step="0.01" name="assumed_price" value="{{ settings.assumed_price }}"></label>
+    <label class="check" data-help="When enabled, modeled SATA income is reinvested instead of treated as cash income."><input type="checkbox" name="drip_enabled" value="true" {% if settings.drip_enabled %}checked{% endif %}> DRIP enabled</label>
+    <label class="check" data-help="When enabled, modeled payments occur only on business days."><input type="checkbox" name="business_day_payments" value="true" {% if settings.business_day_payments %}checked{% endif %}> Business-day payments</label>
+    <label class="wide" data-help="Optional notes about assumptions or modeling choices.">Notes <input name="notes" value="{{ settings.notes or "" }}"></label>
+    <button type="submit">Save Settings</button>
+  </form>
+</section>
+
+<section class="notice">
+  Account tax status defaults to tax-free. Taxable-account drag is intentionally not applied by default.
+  SATA yield and price are assumptions, not guarantees.
+</section>
+{% endblock %}

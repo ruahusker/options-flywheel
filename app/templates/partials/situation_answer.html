@@ -1,0 +1,18 @@
+{% if warnings %}
+  <section class="warnings">
+    {% for warning in warnings %}
+      <div>{{ warning }}</div>
+    {% endfor %}
+  </section>
+{% endif %}
+
+{% if answer %}
+  <div class="rationale-panel situation-answer-panel">
+    <div class="rationale-head">
+      <strong>Follow-up Answer</strong>
+      <span>{{ answer.provider }}{% if answer.model %} · {{ answer.model }}{% endif %}</span>
+    </div>
+    <div class="question-line">{{ answer.question }}</div>
+    <pre>{{ answer.text }}</pre>
+  </div>
+{% endif %}

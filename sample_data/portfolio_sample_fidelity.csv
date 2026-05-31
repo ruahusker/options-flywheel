@@ -1,0 +1,12 @@
+Account Number,Account Name,Symbol,Description,Quantity,Last Price,Last Price Change,Current Value,Today's Gain/Loss Dollar,Today's Gain/Loss Percent,Total Gain/Loss Dollar,Total Gain/Loss Percent,Percent Of Account,Cost Basis Total,Average Cost Basis,Type
+Z12345678,Retirement Rollover,IBIT,ISHARES BITCOIN TRUST ETF,1530.849,$41.63,+$0.21,"$63,729.24",+$321.48,+0.51%,"$12,345.00",24.01%,62.30%,"$51,384.24",$33.57,Margin,
+Z12345678,Retirement Rollover,ASST,ASST BITCOIN TREASURY CO,900.444,$17.67,-$0.31,"$15,910.84",-$279.14,-1.72%,"$2,100.00",15.21%,15.55%,"$13,810.84",$15.34,Margin,
+Z12345678,Retirement Rollover,SATA,SATA INCOME PREFERRED,5.808,$100.01,+$0.01,$580.85,+$0.06,+0.01%,$0.85,0.15%,0.57%,$580.00,$99.86,Margin,
+Z12345678,Retirement Rollover,BSOL,BSOL COMMON SHARES,636.836,$11.08,+$0.12,"$7,056.14",+$76.42,+1.10%,$456.14,6.91%,6.90%,"$6,600.00",$10.36,Margin,
+Z12345678,Retirement Rollover,SPAXX**,FIDELITY GOVERNMENT MONEY MARKET,2500.25,$1.00,$0.00,"$2,500.25",$0.00,0.00%,$0.00,0.00%,2.44%,"$2,500.25",$1.00,Cash,
+Z12345678,Retirement Rollover,Pending activity,Pending activity,,,$0.00,$30.63,$0.00,0.00%,$0.00,0.00%,0.03%,,,Cash,
+Z12345678,Retirement Rollover, -IBIT260605C43.5,IBIT JUN 05 2026 $43.50 CALL,-15,$1.15,-$0.10,"-$1,725.00",+$150.00,+8.00%,-$525.00,-43.75%,-1.69%,$1.50,$1.50,Margin,
+Z12345678,Retirement Rollover, -ASST260605C20.5,ASST JUN 05 2026 $20.50 CALL,-9,$0.82,-$0.05,-$738.00,+$45.00,+5.71%,-$198.00,-36.67%,-0.72%,$1.05,$1.05,Margin,
+Z12345678,Retirement Rollover, -ASST260605C22.5,ASST JUN 05 2026 $22.50 CALL,9,$0.31,+$0.02,$279.00,+$18.00,+6.90%,$18.00,6.90%,0.27%,$0.29,$0.29,Margin,
+
+The data and information in this export is provided for informational purposes only.

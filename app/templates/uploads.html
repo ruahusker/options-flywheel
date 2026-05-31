@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}Uploads - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Uploads</h1>
+    <p>Import Fidelity positions, account history, option chains, or OHLCV history. Preview first, then confirm import.</p>
+  </div>
+</section>
+
+<section>
+  <form action="{{ base_path }}/uploads/preview" method="post" enctype="multipart/form-data" class="form-row">
+    <label data-help="Choose the parser that matches the CSV export you are uploading.">File type
+      <select name="file_kind">
+        <option value="fidelity_positions">Fidelity positions CSV</option>
+        <option value="fidelity_history">Fidelity account history CSV</option>
+        <option value="generic_portfolio">Generic portfolio CSV</option>
+        <option value="ibit_option_chain">IBIT option chain CSV</option>
+        <option value="asst_option_chain">ASST option chain CSV</option>
+        <option value="ibit_ohlcv">IBIT OHLCV CSV</option>
+        <option value="asst_ohlcv">ASST OHLCV CSV</option>
+      </select>
+    </label>
+    <label data-help="Select the Fidelity or CSV export to preview before importing.">CSV file <input type="file" name="upload_file" accept=".csv" required></label>
+    <button type="submit">Preview Upload</button>
+  </form>
+</section>
+
+{% if imported is defined %}
+  <section class="message">Imported {{ imported }} rows from {{ filename }}.</section>
+{% endif %}
+{% if journal_imported is defined and journal_imported is not none %}
+  <section class="message">Imported {{ journal_imported }} transactions into the trade journal.</section>
+{% endif %}
+
+{% if parsed %}
+  <section class="metric-grid">
+    <div><span data-help="Rows successfully parsed into holdings, options, cash, or history items.">Rows imported</span><strong>{{ parsed.diagnostics.rows_imported }}</strong></div>
+    <div><span data-help="Rows ignored because they were blank, unsupported, or incomplete.">Rows skipped</span><strong>{{ parsed.diagnostics.rows_skipped }}</strong></div>
+    <div><span data-help="Total value detected from the uploaded file.">Total account value</span><strong>{{ parsed.diagnostics.total_account_value|money }}</strong></div>
+    <div><span data-help="Detected value of non-option equity and ETF holdings.">Equity/ETF value</span><strong>{{ parsed.diagnostics.equity_etf_value|money }}</strong></div>
+    <div><span data-help="Detected SATA holding value.">SATA value</span><strong>{{ parsed.diagnostics.sata_value|money }}</strong></div>
+    <div><span data-help="Detected cash and sweep fund value.">Cash value</span><strong>{{ parsed.diagnostics.cash_value|money }}</strong></div>
+    <div><span data-help="Detected unsettled or pending account activity.">Pending activity</span><strong>{{ parsed.diagnostics.pending_activity|money }}</strong></div>
+    <div><span data-help="Detected mark-to-market value of option positions.">Option market value</span><strong>{{ parsed.diagnostics.option_market_value|money }}</strong></div>
+  </section>
+
+  <section>
+    <h2>Coverage Diagnostics</h2>
+    <table>
+      <thead><tr><th data-help="Underlying ticker.">Underlying</th><th data-help="Imported share count.">Shares</th><th data-help="Short call contracts imported for this underlying.">Short calls</th><th data-help="Long call contracts imported for this underlying.">Long calls</th><th data-help="Short put contracts imported for this underlying.">Short puts</th><th data-help="Shares currently covered by short calls.">Optioned shares</th><th data-help="Shares not currently covered by short calls.">Uncovered shares</th><th data-help="Percent of shares currently covered.">Optioned %</th></tr></thead>
+      <tbody>
+        {% for row in parsed.diagnostics.coverage %}
+          <tr>
+            <td>{{ row.underlying }}</td>
+            <td>{{ row.shares|num }}</td>
+            <td>{{ row.short_call_contracts }}</td>
+            <td>{{ row.long_call_contracts }}</td>
+            <td>{{ row.short_put_contracts }}</td>
+            <td>{{ row.optioned_shares }}</td>
+            <td>{{ row.uncovered_shares|num }}</td>
+            <td>{{ row.optioned_percentage|pct }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="split">
+    <div>
+      <h2>Parsed Holdings</h2>
+      <table>
+        <thead><tr><th data-help="Imported security symbol.">Symbol</th><th data-help="Imported quantity.">Quantity</th><th data-help="Imported current value.">Value</th><th data-help="Parser-assigned asset class.">Class</th></tr></thead>
+        <tbody>
+          {% for row in preview_rows %}
+            <tr><td>{{ row.symbol }}</td><td>{{ row.quantity|num }}</td><td>{{ row.current_value|money }}</td><td>{{ row.asset_class }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div>
+      <h2>Parsed Options</h2>
+      <table>
+        <thead><tr><th data-help="Normalized option symbol.">Symbol</th><th data-help="Underlying ticker.">Underlying</th><th data-help="Long or short, inferred from quantity.">Side</th><th data-help="Option contract count.">Contracts</th><th data-help="Option strike price.">Strike</th><th data-help="Option expiration date.">Expiration</th></tr></thead>
+        <tbody>
+          {% for row in preview_options %}
+            <tr><td>{{ row.normalized_symbol }}</td><td>{{ row.underlying }}</td><td>{{ row.side }}</td><td>{{ row.contracts }}</td><td>{{ row.strike|money }}</td><td>{{ row.expiration }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <form action="{{ base_path }}/uploads/import" method="post" class="confirm-form">
+    <input type="hidden" name="file_kind" value="{{ file_kind }}">
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="content_b64" value="{{ content_b64 }}">
+    <button type="submit">Confirm Import</button>
+  </form>
+{% endif %}
+
+{% if generic_rows %}
+  <section>
+    <h2>CSV Preview</h2>
+    <p>{{ row_count }} rows detected.</p>
+    <table>
+      <thead>
+        <tr>{% for key in generic_rows[0].keys() %}<th>{{ key }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in generic_rows %}
+          <tr>{% for value in row.values() %}<td>{{ value }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <form action="{{ base_path }}/uploads/import" method="post" class="confirm-form">
+      <input type="hidden" name="file_kind" value="{{ file_kind }}">
+      <input type="hidden" name="filename" value="{{ filename }}">
+      <input type="hidden" name="content_b64" value="{{ content_b64 }}">
+      <button type="submit">Confirm Import</button>
+    </form>
+  </section>
+{% endif %}
+{% endblock %}

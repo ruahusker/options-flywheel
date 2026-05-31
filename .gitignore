@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+sata_options_optimizer.db
+*.sqlite
+*.sqlite3
+.env

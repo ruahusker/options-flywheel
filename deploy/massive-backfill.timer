@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Options Flywheel Massive backfill chunks
+
+[Timer]
+OnBootSec=5min
+OnUnitInactiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

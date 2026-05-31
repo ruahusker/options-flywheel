@@ -1,0 +1,11 @@
+[Unit]
+Description=Options Flywheel Massive historical backfill chunk
+After=network.target
+
+[Service]
+Type=oneshot
+User=main
+Group=main
+WorkingDirectory=/home/main/options
+EnvironmentFile=/home/main/options/.env
+ExecStart=/home/main/options/.venv/bin/python /home/main/options/scripts/massive_backfill.py --mode focused-cycle --max-calls 5 --calls-per-minute 5 --max-contracts 5 --resume-contracts

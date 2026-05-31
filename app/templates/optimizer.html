@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Optimizer - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Strategy Optimizer</h1>
+    <p>Rank weekly option candidates by premium, upside preservation, liquidity, trend alignment, and scenario robustness.</p>
+  </div>
+</section>
+
+<section>
+  <form method="post" class="settings-grid">
+    <label>Optioned sleeve
+      <select name="optioned_pct">
+        {% for pct_value in [0.25, 0.35, 0.40, 0.50] %}
+          <option value="{{ pct_value }}" {% if settings.optioned_pct == pct_value %}selected{% endif %}>{{ pct_value|pct }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Minimum untouched core <input type="number" step="0.01" name="min_untouched_pct" value="{{ settings.min_untouched_pct }}"></label>
+    <label>Call delta min <input type="number" step="0.01" name="call_delta_min" value="{{ settings.call_delta_min }}"></label>
+    <label>Call delta max <input type="number" step="0.01" name="call_delta_max" value="{{ settings.call_delta_max }}"></label>
+    <label>Put delta min <input type="number" step="0.01" name="put_delta_min" value="{{ settings.put_delta_min }}"></label>
+    <label>Put delta max <input type="number" step="0.01" name="put_delta_max" value="{{ settings.put_delta_max }}"></label>
+    <label>Minimum weekly premium <input type="number" step="1" name="min_weekly_premium" value="{{ settings.min_weekly_premium }}"></label>
+    <label>Objective
+      <select name="objective">
+        {% for objective in ["balanced", "maximize income", "preserve upside", "minimize assignment", "retirement glidepath"] %}
+          <option value="{{ objective }}" {% if settings.objective == objective %}selected{% endif %}>{{ objective }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Refresh Recommendations</button>
+  </form>
+</section>
+
+<section>
+  <h2>Candidate ranking</h2>
+  <p class="section-sub">Deterministic ranking driven by expected value and the IV-vs-realized-vol edge. For an AI walk-through of a specific symbol's trade, use <a href="{{ base_path }}/">This Week</a>.</p>
+  <table>
+    <thead><tr>
+      <th data-help="Underlying ticker.">Symbol</th>
+      <th data-help="Best rule-based action for the configured sleeve.">Action</th>
+      <th data-help="Contract count for the configured coverage.">Qty</th>
+      <th data-help="Selected strike.">Strike</th>
+      <th data-help="Selected expiration.">Exp</th>
+      <th data-help="Option delta.">Delta</th>
+      <th data-help="Estimated credit, haircut toward the bid for a realistic sell fill.">Credit</th>
+      <th data-help="Premium minus expected short cost under the realized-vol forecast. Positive is +EV.">EV</th>
+      <th data-help="Variance risk premium: IV divided by realized-vol forecast. Above 1.0 = richly priced.">Edge</th>
+      <th data-help="Where current IV sits in its trailing range. Builds after ~20 observations.">IV rank</th>
+      <th data-help="Price below which the covered position trails holding the shares.">Breakeven</th>
+      <th data-help="Risk-neutral probability the underlying finishes above breakeven (N(d2)).">Profit</th>
+      <th data-help="Risk-neutral assignment probability, N(d2). For a covered call, assignment is the max-profit outcome.">Assign N(d2)</th>
+      <th data-help="Composite optimizer score.">Score</th>
+      <th data-help="Guardrail flags raised by the optimizer.">Warnings</th>
+    </tr></thead>
+    <tbody>
+      {% for rec in recommendations %}
+        <tr>
+          <td>{{ rec.symbol }}</td>
+          <td>{{ rec.best.action }}</td>
+          <td>{{ rec.best.contracts }}</td>
+          <td>{{ rec.best.strike|money }}</td>
+          <td>{{ rec.best.expiration or "-" }}</td>
+          <td>{{ rec.best.delta|num }}</td>
+          <td>{{ rec.best.expected_credit|money }}</td>
+          <td class="{{ 'pos' if (rec.best.expected_value or 0) > 0 else 'neg' }}">{{ rec.best.expected_value|money }}</td>
+          <td class="{{ 'pos' if (rec.best.vrp_ratio or 0) > 1 else 'neg' }}">{% if rec.best.vrp_ratio is not none %}{{ "%.2f"|format(rec.best.vrp_ratio) }}&times;{% else %}-{% endif %}</td>
+          <td>{% if rec.best.iv_rank is not none %}{{ rec.best.iv_rank|pct }}{% else %}&mdash;{% endif %}</td>
+          <td>{{ rec.best.breakeven|money }}</td>
+          <td>{% if rec.best.profit_probability is not none %}{{ rec.best.profit_probability|pct }}{% else %}-{% endif %}</td>
+          <td>{{ rec.best.assignment_probability_proxy|pct }}</td>
+          <td>{{ rec.best.total_score|num }}</td>
+          <td>{{ rec.warnings|join("; ") }}</td>
+        </tr>
+        <tr class="subrow"><td colspan="15">{{ rec.best.reason }}</td></tr>
+      {% else %}
+        <tr><td colspan="15">No optimizer output yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="notice">
+  The optimizer can recommend skipping a trade. It explicitly penalizes heavy-bull underperformance, wide spreads,
+  low liquidity, stale data, excessive assignment risk, and strategies that preserve too little upside.
+</section>
+{% endblock %}

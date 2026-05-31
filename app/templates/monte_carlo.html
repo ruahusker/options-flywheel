@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Monte Carlo - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Monte Carlo</h1>
+    <p>Weekly wheel-state simulation with assignment, cash drag, SATA compounding, and buy-and-hold comparison.</p>
+  </div>
+</section>
+
+<section>
+  <form method="post" class="settings-grid">
+    <label>Paths <input type="number" name="paths" value="{{ paths }}"></label>
+    <label>Years <input type="number" name="years" value="{{ years }}"></label>
+    <label>IBIT annual volatility <input type="number" step="0.01" name="ibit_vol" value="{{ ibit_vol }}"></label>
+    <label>ASST annual volatility <input type="number" step="0.01" name="asst_vol" value="{{ asst_vol }}"></label>
+    <label>Drift <input type="number" step="0.01" name="drift" value="{{ drift }}"></label>
+    <label>Correlation <input type="number" step="0.01" name="correlation" value="{{ correlation }}"></label>
+    <label>Annual premium rate <input type="number" step="0.01" name="annual_premium_rate" value="{{ annual_premium_rate }}"></label>
+    <label>Premium variability <input type="number" step="0.01" name="premium_variability" value="{{ premium_variability }}"></label>
+    <label>Optioned sleeve <input type="number" step="0.01" name="optioned_pct" value="{{ optioned_pct }}"></label>
+    <button type="submit">Run Monte Carlo</button>
+  </form>
+</section>
+
+{% if result %}
+  <section class="metric-grid">
+    <div><span>Median</span><strong>{{ result.median|money }}</strong></div>
+    <div><span>Mean</span><strong>{{ result.mean|money }}</strong></div>
+    <div><span>5th percentile</span><strong>{{ result.p5|money }}</strong></div>
+    <div><span>95th percentile</span><strong>{{ result.p95|money }}</strong></div>
+    <div><span>Win rate vs B&H</span><strong>{{ result.win_rate_vs_buy_hold|pct }}</strong></div>
+    <div><span>Underperform by threshold</span><strong>{{ result.probability_underperforming_by_threshold|pct }}</strong></div>
+    <div><span>Expected SATA value</span><strong>{{ result.expected_sata_value|money }}</strong></div>
+    <div><span>Expected income at rate</span><strong>{{ result.expected_income_at_rate|money }}</strong></div>
+    <div><span>Worst simulated drawdown</span><strong class="risk">{{ result.worst_simulated_drawdown|pct }}</strong></div>
+    <div><span>Upside capture</span><strong>{{ result.upside_capture_ratio|pct }}</strong></div>
+    <div><span>Assignment frequency</span><strong>{{ result.assignment_frequency|num }}</strong></div>
+    <div><span>Time in cash</span><strong>{{ result.time_in_cash|pct }}</strong></div>
+  </section>
+{% endif %}
+{% endblock %}
