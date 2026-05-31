@@ -11,6 +11,7 @@ from app.services.ai_rationale import RationaleResult, generate_rationale
 from app.services.indicators import calculate_indicators
 from app.services.iv_history import iv_rank_for_symbol, record_atm_iv
 from app.services.market_data import get_provider
+from app.services import precompute
 from app.services.premium_allocation import build_premium_allocation
 from app.services.recommendation_engine import generate_recommendation
 from app.services.risk_engine import calculate_dashboard_metrics
@@ -30,49 +31,16 @@ router = APIRouter()
 
 @router.get("/")
 def week(request: Request, db: Session = Depends(get_db)):
-    """Primary weekly cockpit: per-symbol verdict, the supporting edge, the trade, and routing."""
-    snapshot = latest_snapshot(db)
-    if not snapshot:
-        return templates.TemplateResponse(
-            request,
-            "week.html",
-            {"snapshot": None, "warnings": ["Upload a Fidelity positions CSV to populate This Week."]},
-        )
+    """Primary weekly cockpit: per-symbol verdict, the supporting edge, the trade, and routing.
 
-    holdings, options, cash_positions = snapshot_parts(db, snapshot)
-    metrics = calculate_dashboard_metrics(snapshot, holdings, options, cash_positions)
-    sata_settings = get_sata_settings(db)
-    provider = get_provider()
-    rows, roll_warnings = build_roll_decision_rows(metrics, options, provider, db)
-
-    weekly_premium = sum(row.recurring_weekly_premium for row in rows)
-    metrics.estimated_weekly_premium = weekly_premium
-    metrics.estimated_annual_premium = weekly_premium * 52
-    premium_allocation = build_premium_allocation(metrics, rows)
-    projections = project_multiple_horizons(
-        initial_value=metrics.sata_value,
-        weekly_contribution=premium_allocation.amount_for("SATA"),
-        annual_rate=sata_settings.annual_dividend_rate,
-        drip_enabled=sata_settings.drip_enabled,
-        assumed_price=sata_settings.assumed_price,
-        compounding_mode=sata_settings.compounding_mode,
-        tax_rate=getattr(sata_settings, "tax_rate", 0.0) or 0.0,
-    )
-
+    Renders the precomputed payload built by the scheduled refresh job (or an upload rebuild); no
+    live fetch or computation happens on this request.
+    """
+    payload = precompute.load_or_build("week", db)
     return templates.TemplateResponse(
         request,
         "week.html",
-        {
-            "snapshot": snapshot,
-            "metrics": metrics,
-            "rows": rows,
-            "premium_allocation": premium_allocation,
-            "projections": projections,
-            "sata_settings": sata_settings,
-            "action_label": action_label,
-            "week_verdict": week_verdict,
-            "warnings": metrics.warnings + roll_warnings,
-        },
+        {**payload, "action_label": action_label, "week_verdict": week_verdict},
     )
 
 

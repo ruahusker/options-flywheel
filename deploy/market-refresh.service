@@ -1,0 +1,11 @@
+[Unit]
+Description=Options Flywheel market-data refresh + precompute
+After=network.target
+
+[Service]
+Type=oneshot
+User=main
+Group=main
+WorkingDirectory=/home/main/options
+EnvironmentFile=/home/main/options/.env
+ExecStart=/home/main/options/.venv/bin/python /home/main/options/scripts/refresh_market_data.py

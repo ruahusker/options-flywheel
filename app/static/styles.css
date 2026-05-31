@@ -101,6 +101,21 @@ a { color: var(--brand); }
   color: #fff;
   white-space: nowrap;
 }
+.data-asof {
+  order: 99;
+  margin-left: auto;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: #bfd7d1;
+  white-space: nowrap;
+  padding: 3px 9px;
+  border: 1px solid rgba(234, 243, 241, 0.18);
+  border-radius: 999px;
+}
+.data-asof.stale {
+  color: #ffd9a8;
+  border-color: rgba(214, 142, 70, 0.6);
+}
 .brand:first-letter,
 .brand { color: #fff; }
 nav {

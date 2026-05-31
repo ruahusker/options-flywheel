@@ -28,6 +28,10 @@ class Settings:
     base_path: str = os.getenv("APP_BASE_PATH", "").rstrip("/")
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./sata_options_optimizer.db")
     market_data_provider: str = os.getenv("MARKET_DATA_PROVIDER", "mock").lower()
+    # When true, the web path reads market data from MarketDataCache via CachedProvider (no live
+    # calls on page load); the scheduled refresh job is the only thing that hits the real provider.
+    # Default false so dev/tests use the real/mock provider directly; the deployed unit sets it true.
+    use_market_cache: bool = os.getenv("MARKET_DATA_CACHE", "false").strip().lower() in {"1", "true", "yes", "on"}
     tradier_token: str | None = os.getenv("TRADIER_TOKEN") or None
     minimax_api_key: str | None = os.getenv("MINIMAX_API_KEY") or None
     minimax_base_url: str = os.getenv("MINIMAX_BASE_URL", "https://api.minimax.io/v1").rstrip("/")

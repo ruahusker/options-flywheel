@@ -38,11 +38,24 @@ def num(value, places: int = 2) -> str:
     return f"{float(value):,.{places}f}"
 
 
+def data_asof_iso() -> str:
+    """ISO-8601 UTC timestamp of the most recent market-data refresh (or "" if none yet).
+
+    Rendered into a data attribute in the topbar; app.js formats it to local time and a live
+    'N min ago', and flags staleness client-side so the label stays current between requests.
+    """
+    from app.services.market_data.cached_provider import latest_refresh_at
+
+    ts = latest_refresh_at()
+    return (ts.isoformat() + "Z") if ts else ""
+
+
 templates.env.filters["money"] = money
 templates.env.filters["pct"] = pct
 templates.env.filters["pct_points"] = pct_points
 templates.env.filters["num"] = num
 templates.env.globals["base_path"] = settings.base_path
+templates.env.globals["data_asof_iso"] = data_asof_iso
 
 
 def latest_snapshot(db: Session) -> PortfolioSnapshot | None:

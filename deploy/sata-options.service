@@ -9,6 +9,8 @@ Group=main
 WorkingDirectory=/home/main/options
 Environment=APP_BASE_PATH=/options
 Environment=MARKET_DATA_PROVIDER=tradier
+# Web path serves precomputed/cached data only — the market-refresh timer does the live fetching.
+Environment=MARKET_DATA_CACHE=true
 Environment=DATABASE_URL=sqlite:///./sata_options_optimizer.db
 ExecStart=/home/main/options/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001
 Restart=always

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Options Flywheel market-data refresh every 15 min during market hours
+
+[Timer]
+# Server runs in US Central; this window (08:00-15:45 CT) brackets the 09:30-16:00 ET session plus a
+# post-close snapshot. The refresh script gates on the Tradier market clock, so fires outside the
+# actual open/postmarket window (early, or on holidays) just do a cheap clock check and exit.
+OnCalendar=Mon-Fri 08..15:00/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target

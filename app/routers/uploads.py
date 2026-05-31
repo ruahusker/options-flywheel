@@ -15,9 +15,11 @@ from app.models.market_data import PriceHistory
 from app.models.options import OptionChainSnapshot, OptionContract
 from app.models.portfolio import CashPosition, Holding, OptionPosition, PortfolioSnapshot
 from app.routers.common import templates
+from app.services import precompute
 from app.services.account_names import canonical_account, canonical_account_name
 from app.services.fidelity_history_parser import FidelityAccountHistoryCsvParser
 from app.services.fidelity_parser import FidelityPositionsCsvParser
+from app.services.market_data.cached_provider import CachedProvider
 
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
@@ -89,6 +91,13 @@ def import_upload(
     else:
         warnings.append("Generic portfolio preview is supported; import is not mapped to the portfolio snapshot schema.")
     db.commit()
+    # A new portfolio snapshot invalidates the precomputed pages — rebuild them now (against cached
+    # market data, no live calls) so the new positions show immediately instead of next refresh tick.
+    if file_kind in {"fidelity_positions", "fidelity_history"}:
+        try:
+            precompute.refresh_all(db, CachedProvider())
+        except Exception as exc:  # a rebuild failure must never fail the import
+            warnings.append(f"Imported, but precompute rebuild failed: {exc}")
     return templates.TemplateResponse(
         request,
         "uploads.html",

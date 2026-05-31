@@ -4,11 +4,9 @@ from fastapi import APIRouter, Depends, Form, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.routers.common import latest_snapshot, snapshot_parts, templates
-from app.services.indicators import calculate_indicators
+from app.routers.common import templates
+from app.services import precompute
 from app.services.market_data import get_provider
-from app.services.recommendation_engine import generate_recommendation
-from app.services.risk_engine import calculate_dashboard_metrics
 from app.services.strategy_optimizer import OptimizerSettings
 
 
@@ -21,7 +19,9 @@ router = APIRouter(prefix="/optimizer", tags=["optimizer"])
 
 @router.get("")
 def optimizer_page(request: Request, db: Session = Depends(get_db)):
-    return _render_optimizer(request, db, OptimizerSettings())
+    # Default settings view comes from the precomputed cache.
+    payload = precompute.load_or_build("optimizer", db)
+    return templates.TemplateResponse(request, "optimizer.html", payload)
 
 
 @router.post("")
@@ -47,48 +47,9 @@ def run_optimizer(
         min_weekly_premium,
         objective,
     )
-    return _render_optimizer(request, db, settings)
-
-
-def _render_optimizer(request: Request, db: Session, settings: OptimizerSettings):
-    snapshot = latest_snapshot(db)
-    warnings: list[str] = []
-    recommendations = []
-    metrics = None
-    if snapshot:
-        holdings, options, cash_positions = snapshot_parts(db, snapshot)
-        metrics = calculate_dashboard_metrics(snapshot, holdings, options, cash_positions)
-        provider = get_provider()
-        for symbol in ("IBIT", "ASST"):
-            shares = metrics.shares_by_symbol.get(symbol, 0.0)
-            if shares <= 0:
-                continue
-            try:
-                quote = provider.get_quote(symbol)
-                expirations = provider.get_option_expirations(symbol)
-                chain = provider.get_option_chain(symbol, expirations[0]) if expirations else []
-                indicator = calculate_indicators(symbol, provider.get_price_history(symbol, 90, "1d"))
-                recommendations.append(
-                    generate_recommendation(
-                        symbol=symbol,
-                        shares=shares,
-                        available_cash=metrics.cash_value + metrics.pending_activity,
-                        quote=quote,
-                        chain=chain,
-                        indicators=indicator,
-                        settings=settings,
-                        existing_short_call_contracts=int(metrics.option_exposure.get(symbol, {}).get("short_calls", 0)),
-                    )
-                )
-            except Exception as exc:
-                warnings.append(f"{symbol}: {exc}")
-    else:
-        warnings.append("Upload positions before running the optimizer.")
-    return templates.TemplateResponse(
-        request,
-        "optimizer.html",
-        {"settings": settings, "snapshot": snapshot, "metrics": metrics, "recommendations": recommendations, "warnings": warnings},
-    )
+    # Custom run: compute live against cached market data (CachedProvider) — fast, no network.
+    payload = precompute.build_optimizer(db, get_provider(), settings)
+    return templates.TemplateResponse(request, "optimizer.html", payload)
 
 
 def _settings_from_form(

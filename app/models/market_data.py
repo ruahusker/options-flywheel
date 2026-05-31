@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Column, Date, DateTime, Float, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 
 from app.database import Base
 
@@ -100,3 +100,47 @@ class OptionPriceBar(Base):
     vwap = Column(Float)
     transactions = Column(Integer)
     fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class MarketDataCache(Base):
+    """Latest live-provider payload (quote/history/expirations/chain/status), refreshed on a schedule.
+
+    The web path reads these rows through CachedProvider instead of calling the live provider, so
+    page loads make no external calls. `kind` selects the payload type; `key` is the expiration ISO
+    date for chains and "" otherwise. `payload_json` is the pydantic schema serialized with
+    model_dump_json (a JSON array for list payloads like history/chain/expirations).
+    """
+
+    __tablename__ = "market_data_cache"
+    __table_args__ = (
+        UniqueConstraint("symbol", "kind", "key", name="uq_market_data_cache_symbol_kind_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(32), nullable=False, index=True)
+    kind = Column(String(20), nullable=False)
+    key = Column(String(32), nullable=False, default="")
+    payload_json = Column(Text, nullable=False)
+    refreshed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class PrecomputeCache(Base):
+    """Precomputed render payload for a page, produced by the scheduled job (or an upload rebuild).
+
+    `payload` is a pickled blob of the page's computed objects so routers can render with zero
+    computation. `snapshot_id` is the portfolio snapshot the payload was built against (0 for
+    portfolio-independent pages like indicators/optimizer/live-data). `market_refreshed_at` records
+    when the underlying market data was pulled, for the "Data as of …" indicator.
+    """
+
+    __tablename__ = "precompute_cache"
+    __table_args__ = (
+        UniqueConstraint("page", "snapshot_id", name="uq_precompute_cache_page_snapshot"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    page = Column(String(40), nullable=False, index=True)
+    snapshot_id = Column(Integer, nullable=False, default=0)
+    payload = Column(LargeBinary, nullable=False)
+    refreshed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    market_refreshed_at = Column(DateTime)
