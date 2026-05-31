@@ -3,7 +3,7 @@ Description=Run Options Flywheel Massive backfill chunks
 
 [Timer]
 OnBootSec=5min
-OnUnitInactiveSec=15min
+OnUnitInactiveSec=2min
 Persistent=true
 
 [Install]
