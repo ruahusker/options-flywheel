@@ -36,7 +36,8 @@ sudo systemctl restart sata-options.service
 Live data is selected with environment variables in `.env`:
 
 ```bash
-MARKET_DATA_PROVIDER=yahoo
+MARKET_DATA_PROVIDER=tradier
+MARKET_DATA_CACHE=true
 APP_BASE_PATH=
 MINIMAX_API_KEY=
 MINIMAX_BASE_URL=https://api.minimax.io/v1
@@ -61,11 +62,60 @@ IBKR_PORT=7497
 IBKR_CLIENT_ID=1
 ```
 
-`yahoo` is the default deployed provider for no-key real quotes, price history, expirations, and option chains. Yahoo option Greeks are calculated locally from the chain's IV/price fields when the provider does not return Greeks. Treat Yahoo data as public/delayed and confirm in Fidelity or another brokerage before trading.
+`tradier` is the deployed provider. It returns native dealer Greeks (delta/gamma/theta/vega + IV via ORATS) on the option chain, so the roll engine uses dealer Greeks instead of locally-computed ones. Set `TRADIER_TOKEN` to a Tradier production token. Treat the data as delayed when the market is closed and confirm in Fidelity or another brokerage before trading.
 
-`mock` still exists for offline development with `sample_data/`, but production use should be `yahoo`, `tradier`, `polygon`, `alpaca`, or `ibkr`. API keys are read from environment variables only and are not stored in SQLite.
+`yahoo` remains a no-key fallback (Greeks computed locally from IV/price). `mock` exists for offline development with `sample_data/`; `polygon`, `alpaca`, and `ibkr` are scaffolded. API keys are read from environment variables only and are not stored in SQLite.
 
-Tradier is the recommended API-key provider for richer live option-chain data because its options-chain endpoint can include Greeks when requested. Polygon/Massive, Alpaca, and IBKR are scaffolded with configuration warnings in this MVP.
+`MARKET_DATA_CACHE=true` puts the web app in cached mode: page loads read precomputed data and make **no** live provider calls (see "Scheduled Market-Data Refresh" below). Leave it unset for local development so pages fetch live from the configured provider.
+
+## Scheduled Market-Data Refresh
+
+In production the web app never fetches market data or runs the heavy page computation on request.
+A scheduled job is the **only** thing that calls the live provider (Tradier); the web path renders a
+precomputed snapshot, so pages load instantly and outbound/OPRA calls stay minimal.
+
+How it fits together:
+
+- `scripts/refresh_market_data.py` fetches quotes, history, expirations, and the front option chains
+  for IBIT/ASST into `MarketDataCache`, records the daily ATM IV, and precomputes every heavy page's
+  full render payload into `PrecomputeCache` (pickled). It is gated on the Tradier market clock and
+  fetches only when the market is `open`/`postmarket` (use `--force` for a manual run).
+- `app/services/market_data/cached_provider.py` (`CachedProvider`) serves pages from
+  `MarketDataCache`. `get_provider()` returns it when `MARKET_DATA_CACHE=true`; the refresh job uses
+  `get_refresh_provider()` for the real provider.
+- `app/services/precompute.py` holds one builder per page (`week`, `roll`, `portfolio`, `optimizer`,
+  `indicators`, `scenarios`, `monte_carlo`, `live_data`). Routers call `precompute.load_or_build`;
+  a cold cache falls back to a live build through `CachedProvider`. Uploading a Fidelity CSV triggers
+  an immediate rebuild so new positions show without waiting for the next tick.
+- The topbar shows a "Data as of HH:MM · N min ago" indicator (formatted client-side in `app.js`),
+  turning amber when the data is more than ~25 minutes stale.
+
+Deployed timer (every 15 min during market hours, US Central window with the Tradier clock as the
+precise gate):
+
+```bash
+sudo systemctl status market-refresh.timer
+sudo systemctl start market-refresh.service          # run one refresh now (skips if market closed)
+python scripts/refresh_market_data.py --force        # force a refresh regardless of market state
+```
+
+Units live in `deploy/market-refresh.{service,timer}`. The web unit
+(`deploy/sata-options.service`) sets `MARKET_DATA_CACHE=true`.
+
+## Authentication
+
+Everything under `/options` is protected by nginx HTTP basic auth (`auth_basic`) on both the app and
+static locations — see `deploy/nginx-options-location.conf`. The password file is server-only and is
+**not** in git. Create or rotate it with:
+
+```bash
+# rotate the password (prompts; no plaintext on the command line)
+sudo sh -c "printf 'options:%s\n' \"$(openssl passwd -apr1)\" > /etc/nginx/.options_htpasswd"
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+This keeps the deployment within Tradier/OPRA personal-use terms: the market data is for the account
+holder only and is not displayed/redistributed to others.
 
 ## Massive Historical Backfill
 
