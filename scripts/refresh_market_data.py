@@ -42,7 +42,12 @@ def main() -> int:
     market = result["market"]
     print(f"Market status: {market['market_status']}")
     for symbol, counts in market["symbols"].items():
-        print(f"  {symbol}: {counts['bars']} bars, {counts['expirations']} expirations, {counts['chains_cached']} chains cached")
+        print(
+            f"  {symbol}: {counts['bars']} bars, {counts['expirations']} expirations, "
+            f"{counts['chains_cached']} chains cached, {counts.get('focused_snapshots', 0)} focused snapshots"
+        )
+        for warning in counts.get("warnings") or []:
+            print(f"    warning: {warning}")
     errors = result.get("precompute_errors") or []
     print(f"Precomputed pages rebuilt ({'no errors' if not errors else f'{len(errors)} errors'}).")
     for err in errors:

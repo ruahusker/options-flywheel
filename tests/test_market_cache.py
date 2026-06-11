@@ -49,14 +49,20 @@ def test_get_provider_returns_cached_only_when_flag_set(monkeypatch):
 def test_cached_provider_roundtrips_written_market_data(monkeypatch):
     from app.services.market_data.mock_provider import MockProvider
     from app.services.market_refresh import fetch_and_cache
+    from app.models.market_data import FocusedOptionSnapshot
 
     TestSession = _shared_memory_sessionmaker()
     # CachedProvider reads through its module-level SessionLocal; point it at the shared test DB.
     monkeypatch.setattr("app.services.market_data.cached_provider.SessionLocal", TestSession)
 
     db = TestSession()
-    fetch_and_cache(db, MockProvider(Path("sample_data")), symbols=("IBIT",), chain_count=1)
+    summary = fetch_and_cache(db, MockProvider(Path("sample_data")), symbols=("IBIT",), chain_count=1)
+    focused_rows = db.query(FocusedOptionSnapshot).filter(FocusedOptionSnapshot.underlying == "IBIT").all()
     db.close()
+
+    assert summary["symbols"]["IBIT"]["focused_snapshots"] == len(focused_rows)
+    assert focused_rows
+    assert any(row.delta is not None and row.implied_volatility is not None for row in focused_rows)
 
     cached = CachedProvider()
     quote = cached.get_quote("IBIT")
@@ -69,6 +75,82 @@ def test_cached_provider_roundtrips_written_market_data(monkeypatch):
     assert expirations
     chain = cached.get_option_chain("IBIT", expirations[0])
     assert isinstance(chain, list)
+
+
+def test_reference_symbols_use_smaller_default_chain_cache():
+    from app.services.market_refresh import (
+        CHAIN_EXPIRATIONS,
+        REFERENCE_CHAIN_EXPIRATIONS,
+        SYMBOLS,
+        _chain_count_for_symbol,
+    )
+
+    assert {"SPY", "BSOL", "ETHA"}.issubset(set(SYMBOLS))
+    assert _chain_count_for_symbol("IBIT", CHAIN_EXPIRATIONS) == CHAIN_EXPIRATIONS
+    assert _chain_count_for_symbol("SPY", CHAIN_EXPIRATIONS) == REFERENCE_CHAIN_EXPIRATIONS
+    assert _chain_count_for_symbol("SPY", 1) == 1
+
+
+def test_focused_option_snapshot_upserts_same_15_minute_bucket():
+    from app.models.market_data import FocusedOptionSnapshot
+    from app.services.market_data.mock_provider import MockProvider
+    from app.services.market_refresh import record_focused_option_snapshots
+
+    TestSession = _shared_memory_sessionmaker()
+    db = TestSession()
+    provider = MockProvider(Path("sample_data"))
+    expiration = provider.get_option_expirations("IBIT")[0]
+    chain = provider.get_option_chain("IBIT", expiration)
+
+    first_count = record_focused_option_snapshots(
+        db,
+        "IBIT",
+        chain,
+        underlying_price=41.63,
+        captured_at=datetime(2026, 6, 1, 10, 2, 0),
+        provider_name="tradier",
+        market_status="open",
+    )
+    db.commit()
+    second_count = record_focused_option_snapshots(
+        db,
+        "IBIT",
+        chain,
+        underlying_price=42.0,
+        captured_at=datetime(2026, 6, 1, 10, 14, 0),
+        provider_name="tradier",
+        market_status="open",
+    )
+    db.commit()
+
+    assert first_count == second_count
+    assert db.query(FocusedOptionSnapshot).count() == first_count
+    row = db.query(FocusedOptionSnapshot).first()
+    assert row.captured_at == datetime(2026, 6, 1, 10, 0, 0)
+    assert row.underlying_price == 42.0
+    db.close()
+
+
+def test_refresh_continues_when_option_expirations_are_unavailable():
+    from app.models.market_data import MarketDataCache
+    from app.services.market_data.mock_provider import MockProvider
+    from app.services.market_refresh import fetch_and_cache
+
+    class NoOptionsProvider(MockProvider):
+        def get_option_expirations(self, symbol):
+            raise RuntimeError("no options")
+
+    TestSession = _shared_memory_sessionmaker()
+    db = TestSession()
+    summary = fetch_and_cache(db, NoOptionsProvider(Path("sample_data")), symbols=("IBIT",), chain_count=1)
+
+    assert summary["symbols"]["IBIT"]["bars"] > 0
+    assert summary["symbols"]["IBIT"]["expirations"] == 0
+    assert summary["symbols"]["IBIT"]["chains_cached"] == 0
+    assert summary["symbols"]["IBIT"]["focused_snapshots"] == 0
+    assert summary["symbols"]["IBIT"]["warnings"]
+    assert db.query(MarketDataCache).filter_by(symbol="IBIT", kind="quote").one_or_none() is not None
+    db.close()
 
 
 def test_cached_provider_missing_data_is_graceful(monkeypatch):

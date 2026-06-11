@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, Index, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Index, Integer, LargeBinary, String, Text, UniqueConstraint
 
 from app.database import Base
 
@@ -99,6 +99,49 @@ class OptionPriceBar(Base):
     volume = Column(Integer)
     vwap = Column(Float)
     transactions = Column(Integer)
+    fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class FocusedOptionSnapshot(Base):
+    """Retained intraday option quote/Greek row for strategy-relevant contracts.
+
+    Unlike `market_data_cache`, these rows are kept for analysis. They are intentionally focused so
+    large chains such as SPY/QQQ/IWM do not become full-chain intraday archives.
+    """
+
+    __tablename__ = "focused_option_snapshots"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_symbol", "captured_at", name="uq_focused_option_snapshot_provider_symbol_time"),
+        Index("ix_focused_option_snapshot_lookup", "underlying", "captured_at", "expiration", "option_type"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(50), nullable=False)
+    provider_symbol = Column(String(128), nullable=False, index=True)
+    underlying = Column(String(32), nullable=False, index=True)
+    captured_at = Column(DateTime, nullable=False, index=True)
+    expiration = Column(Date, nullable=False, index=True)
+    option_type = Column(String(10), nullable=False, index=True)
+    strike = Column(Float, nullable=False, index=True)
+    dte = Column(Integer)
+    underlying_price = Column(Float)
+    moneyness = Column(Float)
+    bid = Column(Float)
+    ask = Column(Float)
+    mid = Column(Float)
+    last = Column(Float)
+    spread = Column(Float)
+    spread_pct = Column(Float)
+    volume = Column(Integer)
+    open_interest = Column(Integer)
+    implied_volatility = Column(Float)
+    delta = Column(Float)
+    gamma = Column(Float)
+    theta = Column(Float)
+    vega = Column(Float)
+    liquidity_score = Column(Float)
+    market_status = Column(String(50), default="unknown", nullable=False)
+    is_stale = Column(Boolean, default=False, nullable=False)
     fetched_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 

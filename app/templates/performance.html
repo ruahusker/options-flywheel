@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Performance - Options Flywheel{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div>
+    <h1>Strategy Performance vs Buy &amp; Hold</h1>
+    <p>Track your actual flywheel net worth (true_strategy_value, including all premiums routed into SATA) against a buy-and-hold counterfactual on the same initial IBIT/ASST shares using your imported snapshot history.</p>
+  </div>
+</section>
+
+{% if not has_data %}
+  <section class="empty">No portfolio snapshots yet. <a href="{{ base_path }}/uploads">Upload positions</a> (or history) to begin tracking.</section>
+{% else %}
+  <section>
+    <form method="get" class="settings-grid">
+      <label>Start snapshot
+        <select name="start">
+          {% for s in available_snapshots %}
+            <option value="{{ s.id }}" {% if selected_start == s.id %}selected{% endif %}>
+              {{ s.created_at.strftime('%Y-%m-%d %H:%M') }} — {{ s.source_filename or 'snapshot' }} ({{ s.total_value|money if s.total_value else '' }})
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>End snapshot
+        <select name="end">
+          {% for s in available_snapshots %}
+            <option value="{{ s.id }}" {% if selected_end == s.id or (not selected_end and loop.last) %}selected{% endif %}>
+              {{ s.created_at.strftime('%Y-%m-%d %H:%M') }} — {{ s.source_filename or 'snapshot' }} ({{ s.total_value|money if s.total_value else '' }})
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit">Update Range</button>
+      <a class="button secondary" href="{{ base_path }}/performance">Reset to all</a>
+    </form>
+  </section>
+
+  {% if summary.error %}
+    <section class="empty">{{ summary.error }}</section>
+  {% else %}
+    <section class="metric-grid">
+      <div>
+        <span>Strategy P/L (period)</span>
+        <strong class="{{ 'pos' if summary.strategy_pnl >= 0 else 'neg' }}">{{ summary.strategy_pnl|money }}</strong>
+        <em>{{ summary.strategy_pct }}%</em>
+      </div>
+      <div>
+        <span>B&amp;H equivalent (initial shares)</span>
+        <strong>{{ summary.end_bnh_value|money }}</strong>
+        <em>on {{ summary.base_ibit_shares|num }} IBIT + {{ summary.base_asst_shares|num }} ASST</em>
+      </div>
+      <div>
+        <span>Out/under vs B&amp;H</span>
+        <strong class="{{ 'pos' if summary.outperformance_vs_bnh >= 0 else 'neg' }}">{{ summary.outperformance_vs_bnh|money }}</strong>
+      </div>
+      <div>
+        <span>Net option premiums (journal)</span>
+        <strong>{{ journal_premiums.net_credit_debit|money }}</strong>
+        <em>{{ journal_premiums.count }} option trades in range</em>
+      </div>
+      <div>
+        <span>Start → End</span>
+        <strong>{{ summary.start_date }} → {{ summary.end_date }}</strong>
+      </div>
+      <div>
+        <span>Ending strategy value</span>
+        <strong>{{ summary.end_strategy_value|money }}</strong>
+      </div>
+    </section>
+
+    <section>
+      <h2>Checkpoint history (Strategy NAV vs B&amp;H NAV)</h2>
+      <p class="section-sub">{{ summary.note }}</p>
+
+      <div class="chart-container" style="margin: 12px 0 20px; max-width: 100%;">
+        <canvas id="perf-chart" height="110"></canvas>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Source</th>
+            <th>Strategy NAV</th>
+            <th>B&amp;H NAV (fixed start shares)</th>
+            <th>Diff (Strategy - B&amp;H)</th>
+            <th>SATA</th>
+            <th>Short calls / puts</th>
+            <th>IBIT / ASST shares @ price</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for cp in checkpoints %}
+          <tr class="{% if cp.diff >= 0 %}positive{% else %}negative{% endif %}">
+            <td>{{ cp.date_label }}</td>
+            <td class="mono" style="font-size:11px; max-width:220px; overflow:hidden; text-overflow:ellipsis;">{{ cp.source }}</td>
+            <td><strong>{{ cp.strategy_value|money }}</strong></td>
+            <td>{{ cp.bnh_value|money }}</td>
+            <td><strong>{{ cp.diff|money }}</strong></td>
+            <td>{{ cp.sata_value|money }}</td>
+            <td>{{ cp.short_calls }} / {{ cp.short_puts }}</td>
+            <td>{{ cp.ibit_shares|num }} @ {{ cp.ibit_price|money }} / {{ cp.asst_shares|num }} @ {{ cp.asst_price|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="notice">
+      <h3 style="margin-top:0;">How this is calculated</h3>
+      <ul style="margin:8px 0 0 18px; line-height:1.45;">
+        <li><strong>Strategy NAV</strong> at each checkpoint = <code>true_strategy_value</code> (long positions ex-SATA + SATA + cash/pending − short option MTM + long option MTM). This is your actual economic net worth under the flywheel at import time.</li>
+        <li><strong>B&amp;H NAV</strong> = (IBIT shares at period start × price at this checkpoint) + (ASST shares at period start × price at this checkpoint) + sidecar value from the start snapshot (SATA + cash + initial option effects, with no premiums added during the period and no short option liability).</li>
+        <li>Positive "Diff" means the flywheel (premiums collected + any other effects) has the account ahead of simply holding those starting shares unoptioned + the starting sidecar.</li>
+        <li>New share purchases or capital added after the chosen start are <em>not</em> included in the B&amp;H line above (choose a later start snapshot after big additions if you want to normalize the comparison).</li>
+        <li>Journal premiums are the net credit/debit on option trades in the date window — the main "extra" generated by the strategy that flows into SATA or is otherwise available.</li>
+      </ul>
+      <p style="margin-top:8px;">This is realized, point-in-time tracking from the snapshots you have imported. It complements the forward-looking Scenarios and Monte Carlo pages.</p>
+    </section>
+  {% endif %}
+{% endif %}
+
+<script>
+(function(){
+  const data = {{ checkpoints | tojson }};
+  if (!data || !data.length) return;
+  const ctx = document.getElementById('perf-chart');
+  if (!ctx || !window.Chart) return;
+
+  const labels = data.map(d => d.date_label);
+  const strat = data.map(d => d.strategy_value);
+  const bnh = data.map(d => d.bnh_value);
+
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Strategy NAV (actual)',
+          data: strat,
+          borderColor: (window.FLYWHEEL || {}).mint || '#46e0a8',
+          backgroundColor: (window.FLYWHEEL || {}).mintSoft || 'rgba(70,224,168,0.10)',
+          fill: true,
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 2
+        },
+        {
+          label: 'B&H (initial shares + start sidecar)',
+          data: bnh,
+          borderColor: (window.FLYWHEEL || {}).brass || '#dca157',
+          backgroundColor: (window.FLYWHEEL || {}).brassSoft || 'rgba(220,161,87,0.08)',
+          tension: 0.25,
+          borderWidth: 2,
+          borderDash: [5,3],
+          pointRadius: 2
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { ticks: { callback: v => '$' + Number(v).toLocaleString() } }
+      },
+      plugins: {
+        legend: { position: 'top', labels: { boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => c.dataset.label + ': $' + Number(c.raw).toLocaleString() } }
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}

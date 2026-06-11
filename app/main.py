@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
-from app.routers import backtest, dashboard, indicators, journal, live_data, monte_carlo, optimizer, roll, scenarios, settings as settings_router, situation, uploads, week
+from app.routers import backtest, dashboard, indicators, journal, live_data, monte_carlo, optimizer, performance, roll, scenarios, settings as settings_router, situation, uploads, week
 
 
 app = FastAPI(title=settings.app_name)
@@ -30,4 +30,5 @@ app.include_router(indicators.router)
 app.include_router(scenarios.router)
 app.include_router(monte_carlo.router)
 app.include_router(journal.router)
+app.include_router(performance.router)
 app.include_router(settings_router.router)

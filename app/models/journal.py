@@ -28,3 +28,6 @@ class TradeJournalEntry(Base):
     realized_option_pnl = Column(Float)
     foregone_upside = Column(Float)
     buy_hold_comparison = Column(Float)
+    # These three columns are reserved for per-trade attribution (populated on future
+    # enhanced imports or analysis). The Performance page provides the primary
+    # aggregate realized vs B&H tracking using snapshots + journal premiums today.
