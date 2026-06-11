@@ -116,3 +116,67 @@ def _indicator(rsi: float, trend: str) -> IndicatorResult:
         recommendation_bias="test",
         warnings=[],
     )
+
+
+def test_coverage_scoring_prefers_middle_sleeve_when_upside_cost_is_material():
+    # Premium 1.9% with 1.2% average foregone upside: positive net, but capping more of the
+    # stack costs quadratically. The old linear score always saturated at 50% coverage on any
+    # positive net; the risk-adjusted score should land on the 35% sleeve here.
+    from app.services.historical_roll_backtest import HistoricalRollSample, _score_bands
+
+    samples = [
+        HistoricalRollSample(
+            regime="neutral",
+            entry_date=date(2026, 3, 1) + timedelta(days=i),
+            expiration=date(2026, 3, 7) + timedelta(days=i),
+            dte=6,
+            estimated_delta=0.32,
+            premium_pct=0.019,
+            foregone_pct=0.012,
+            net_vs_hold_pct=0.007,
+            assigned=True,
+            option_symbol=f"O:IBIT_TEST{i}",
+        )
+        for i in range(14)
+    ]
+    rows = _score_bands(samples)
+    assert rows
+    best = max(rows, key=lambda row: row.score)
+    assert best.coverage_pct == 0.35
+    assert best.distinct_contracts == 14
+
+
+def test_unsettled_contracts_are_not_scored():
+    # A contract expiring beyond the last cached close has no settled outcome; it must not be
+    # marked at today's price and counted as a finished trade.
+    session = make_session()
+    start = date(2026, 1, 1)
+    for index in range(90):
+        day = start + timedelta(days=index)
+        session.add(
+            PriceHistory(
+                provider="massive", symbol="IBIT", interval="1d",
+                date_time=datetime.combine(day, datetime.min.time()),
+                open=100, high=101, low=99, close=100, volume=1000,
+            )
+        )
+    entry = start + timedelta(days=88)
+    expiration = start + timedelta(days=95)  # beyond the last cached close (day 89)
+    session.add(
+        OptionPriceBar(
+            provider="massive", option_symbol="O:IBIT_OPEN", underlying="IBIT",
+            expiration=expiration, option_type="call", strike=105,
+            date_time=datetime.combine(entry, datetime.min.time()), interval="1d",
+            open=1.0, high=1.0, low=1.0, close=1.0, volume=100,
+        )
+    )
+    session.commit()
+
+    hint = build_historical_roll_backtest(
+        session, "IBIT", _indicator(rsi=50, trend="neutral/chop"),
+        static_coverage_pct=0.35, static_delta_min=0.25, static_delta_max=0.35,
+        static_dte_min=5, static_dte_max=7,
+    )
+
+    assert hint.samples == 0
+    assert hint.actionable is False

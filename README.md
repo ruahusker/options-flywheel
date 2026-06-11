@@ -138,15 +138,26 @@ python scripts/massive_backfill.py --mode focused-cycle --max-calls 5 --max-cont
 
 Tables populated by the backfill:
 
-- `price_history` for IBIT/ASST underlying bars.
+- `price_history` for underlying bars.
 - `historical_option_contracts` for option reference data.
 - `option_price_bars` for historical option OHLCV bars.
 
 Underlying bar backfill refreshes from the latest cached bar with a short lookback window, so it keeps recent prices current without replaying the full two-year range. Contract backfill resumes after the latest cached expiration per underlying. Option-bar backfill stores the date fetched through per contract, so later runs append new daily bars instead of replaying the same range.
 
-The deployed timer uses `focused-cycle`: it first spends calls on strategy-relevant option bars, then uses leftover calls to extend contract metadata. Focused option bars prioritize covered-call and cash-secured-put moneyness bands instead of every deep out-of-the-money strike. The `Backtest` page shows current cache coverage, technical-regime coverage, and the next focused contracts waiting for option bars. The backtester should query these local tables, not Massive directly.
+The deployed timer uses `focused-cycle`: it first brings the primary symbols' daily closes current (skipped at zero API cost once up to date for the day — the historical roll backtest marks option outcomes against these closes, so they must not go stale), then spends calls on strategy-relevant option bars, then uses leftover calls to extend contract metadata. Focused option bars prioritize covered-call and cash-secured-put moneyness bands instead of every deep out-of-the-money strike. After the primary IBIT/ASST focused queue and contract range are complete, the same timer starts a future-use historical queue for QQQ, IWM, MSTR, XXI, SPY, BSOL, and ETHA. Those symbols are loaded into the historical tables only; current roll and strategy calculations still use the explicitly supported strategy symbols. The `Backtest` page shows current cache coverage, technical-regime coverage, and the next focused contracts waiting for option bars. The backtester should query these local tables, not Massive directly.
+
+Future-use symbols can be overridden for an ad hoc run:
+
+```bash
+python scripts/massive_backfill.py --mode focused-cycle --future-underlying SPY --future-underlying DIA
+python scripts/massive_backfill.py --mode focused-cycle --no-future-queue
+```
 
 The optimizer page has a portfolio-level AI review button plus a per-ticker `Generate` rationale button. Provider preference is MiniMax, then Kimi, then OpenAI, then local deterministic fallback. If `MINIMAX_API_KEY` is configured, the app calls the MiniMax OpenAI-compatible chat-completions endpoint using `MINIMAX_MODEL`.
+
+The scheduled Tradier refresh caches live quote, 120-day daily history, option expirations, front option chains, and one ATM-IV observation per day. IBIT/ASST keep six front chains for the active strategy pages. Future-use symbols QQQ, IWM, MSTR, XXI, SPY, BSOL, and ETHA cache two front chains by default so the database gets useful context without pulling every large ETF chain on each refresh. These cache rows are upserts, so the snapshot cache stays bounded.
+
+Tradier also retains focused intraday option snapshots in `focused_option_snapshots`. Each 15-minute refresh bucket stores up to 40 strategy-relevant contracts per symbol from the cached front chains, including bid/ask/mid/last, spread, volume, open interest, implied volatility, delta/gamma/theta/vega, DTE, moneyness, and the underlying price at capture time. Manual refreshes in the same 15-minute bucket update the existing rows instead of duplicating them. This keeps useful Greek and liquidity history without archiving full SPY/QQQ/IWM option chains.
 
 ## Uploading Positions
 
@@ -212,6 +223,17 @@ Dashboard, scenarios, and Monte Carlo compare the strategy against buy-and-hold.
 - Outperformance/underperformance versus buy-and-hold.
 
 A strategy can lose money overall but still outperform buy-and-hold in a bearish scenario. The heavy-bull scenario explicitly warns when covered calls or wheel cash drag underperform buy-and-hold.
+
+## Historical Performance Tracking
+
+The **Performance** page (under Account) uses your sequence of imported portfolio snapshots to show realized tracking:
+
+- Strategy NAV over time (`true_strategy_value` from each snapshot — your actual net worth after premiums, SATA routing, option marks, etc.).
+- B&H counterfactual: the exact IBIT + ASST share counts from the *start* of your chosen period, marked to the prices at each later checkpoint, plus the starting sidecar (no extra premiums).
+- Summary P/L, out/under-performance vs that B&H, net premiums collected from the journal in the date range, and a Chart.js equity curve.
+- Use the start/end selectors to focus on specific import periods (e.g. after a big capital addition).
+
+This gives you a concrete, snapshot-based answer to "how has the flywheel actually done vs just holding the shares?"
 
 ## Running Tests
 

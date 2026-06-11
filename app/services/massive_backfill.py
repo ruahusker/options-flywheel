@@ -62,6 +62,10 @@ class MassiveBackfillService:
                 effective_start = start
                 latest_bar = latest_stock_bar_date(db, underlying, interval=interval, provider=self.provider)
                 if resume_from_latest and latest_bar is not None:
+                    # Already current through the requested end: don't burn an API call. The
+                    # next calendar day reopens the window and re-pulls the lookback range.
+                    if latest_bar >= end:
+                        continue
                     effective_start = max(start, latest_bar - timedelta(days=refresh_lookback_days))
                 bars = self.client.get_stock_bars(underlying, effective_start, end, timespan=_massive_timespan(interval))
                 result.stock_bars_seen += len(bars)
