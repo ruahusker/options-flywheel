@@ -3,17 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a1014">
   <title>{% block title %}Options Flywheel{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Spline+Sans+Mono:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="{{ base_path }}/static/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Shared palette so page charts match the Night Desk theme, plus dark Chart.js defaults.
+    window.FLYWHEEL = {
+      mint: "#46e0a8", brass: "#dca157", coral: "#ff7a64", amber: "#ecc06a",
+      ink: "#e9e4d6", muted: "#8fa0a8", grid: "rgba(150, 168, 176, 0.12)",
+      mintSoft: "rgba(70, 224, 168, 0.10)", brassSoft: "rgba(220, 161, 87, 0.08)"
+    };
+    if (window.Chart) {
+      Chart.defaults.color = FLYWHEEL.muted;
+      Chart.defaults.borderColor = FLYWHEEL.grid;
+      Chart.defaults.font.family = "'Spline Sans Mono', ui-monospace, monospace";
+      Chart.defaults.font.size = 11;
+    }
+  </script>
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
+  <div class="desk-glow" aria-hidden="true"></div>
   <header class="topbar">
-    <a class="brand" href="{{ base_path }}/">&#9670; Flywheel</a>
+    <a class="brand" href="{{ base_path }}/"><span class="brand-mark" aria-hidden="true">&#9670;</span>Options&nbsp;Flywheel</a>
     <span class="data-asof" id="data-asof" data-ts="{{ data_asof_iso() }}" data-help="When the market data behind these pages was last refreshed by the scheduled job. Pages render this precomputed snapshot; they do not fetch live on load.">{% if data_asof_iso() %}Data as of &hellip;{% else %}Awaiting first market refresh{% endif %}</span>
     <nav>
       <div class="nav-group">
@@ -33,6 +50,7 @@
       <div class="nav-group">
         <span class="nav-label">Account</span>
         <a href="{{ base_path }}/portfolio" data-help="Full portfolio snapshot, exposure, premium-by-account split, SATA projection, and the Friday roll snapshot.">Portfolio</a>
+        <a href="{{ base_path }}/performance" data-help="Track realized strategy net worth (true_strategy_value including premiums routed to SATA) versus buy-and-hold on the same initial IBIT/ASST shares, using your imported historical snapshots. Shows the actual P/L difference over time.">Performance</a>
         <a href="{{ base_path }}/journal" data-help="Recorded trades, assignments, rolls, and SATA contributions imported or entered manually.">Trade Journal</a>
         <a href="{{ base_path }}/uploads" data-help="Import Fidelity positions or account history so portfolio state and journal entries stay current.">Uploads</a>
         <a href="{{ base_path }}/settings" data-help="SATA projection assumptions and account modeling defaults.">Settings</a>
@@ -52,6 +70,7 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="desk-foot" aria-hidden="true"><span>&#9670;</span> options flywheel &middot; weekly income desk</footer>
   <script src="{{ base_path }}/static/app.js"></script>
 </body>
 </html>

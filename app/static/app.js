@@ -1,4 +1,11 @@
 (function () {
+  // Highlight the current page in the topbar nav.
+  const here = location.pathname.replace(/\/+$/, "") || "/";
+  document.querySelectorAll(".topbar nav a").forEach((link) => {
+    const target = new URL(link.href, location.origin).pathname.replace(/\/+$/, "") || "/";
+    if (target === here) link.classList.add("active");
+  });
+
   const tables = document.querySelectorAll("table");
   tables.forEach((table) => {
     if (!table.parentElement.classList.contains("table-wrap")) {
