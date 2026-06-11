@@ -58,3 +58,20 @@ def test_account_history_parser_canonicalizes_known_account_names():
     assert parsed.account_name == "Steve-Trad IRA"
     assert parsed.holdings[0].account_name == "Steve-Trad IRA"
     assert entries[0].account_name == "Steve-Trad IRA"
+
+
+def test_assignment_and_expiration_rows_close_short_positions():
+    from app.services.fidelity_history_parser import _signed_quantity
+
+    # Option leg of a call assignment: Fidelity logs positive quantity to CLOSE the short.
+    # Flipping it negative used to double the short position (e.g. 29 sold -> 58 shown).
+    assert _signed_quantity(29, "ASSIGNED as of Jun-08-2026 CALL (IBIT) ISHARES BITCOIN JUN 08 26 $33.5 (100 SHS)", None) == 29
+    # Expiration of a short option likewise closes with positive quantity.
+    assert _signed_quantity(5, "EXPIRED CALL (IBIT) ISHARES BITCOIN JUN 05 26 $43.5 (100 SHS)", None) == 5
+    # Expiration of a LONG option arrives with negative quantity and must stay negative.
+    assert _signed_quantity(-3, "EXPIRED CALL (IBIT) ISHARES BITCOIN JUN 05 26 $43.5 (100 SHS)", None) == -3
+    # The companion share-sale row of an assignment still sells shares (negative).
+    assert _signed_quantity(2900, "YOU SOLD ASSIGNED CALLS AS OF 06-08-26 ISHARES BITCOIN TRUST ETF (IBIT) (Cash)", 97150.0) == -2900
+    # Plain open/close transactions are unchanged.
+    assert _signed_quantity(29, "YOU SOLD OPENING TRANSACTION CALL (IBIT) ...", 785.12) == -29
+    assert _signed_quantity(29, "YOU BOUGHT CLOSING TRANSACTION CALL (IBIT) ...", -238.78) == 29

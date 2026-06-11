@@ -194,14 +194,19 @@ def _import_history_journal_entries(db: Session, entries) -> int:
             sata_contribution=item.sata_contribution,
             notes=item.notes,
         )
+        # Dedup on the transaction itself, NOT on notes: notes embed the source filename and
+        # line number, so the same trade re-imported from an overlapping history export looked
+        # "new" and double-counted premiums on the Performance page.
         existing = db.execute(
             select(TradeJournalEntry).where(
                 TradeJournalEntry.created_at == entry.created_at,
                 TradeJournalEntry.account_number == entry.account_number,
                 TradeJournalEntry.ticker == entry.ticker,
                 TradeJournalEntry.action == entry.action,
+                TradeJournalEntry.contracts == entry.contracts,
+                TradeJournalEntry.strike == entry.strike,
+                TradeJournalEntry.expiration == entry.expiration,
                 TradeJournalEntry.credit_debit == entry.credit_debit,
-                TradeJournalEntry.notes == entry.notes,
             )
         ).scalars().first()
         if existing:

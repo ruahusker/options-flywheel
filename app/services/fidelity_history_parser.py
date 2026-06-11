@@ -371,9 +371,16 @@ def _signed_quantity(quantity: float, action: str, amount: float | None) -> floa
         "exchange out",
         "transfer out",
         "journal out",
-        "assigned",
-        "expired",
     )
+    # Assignment/expiration/exercise rows are CLOSING transactions and carry the correct sign in
+    # the CSV: positive quantity closes a short, negative closes a long (caught above). Forcing
+    # them negative doubled short positions instead of flattening them. Note the share-sale row
+    # that accompanies a call assignment ("YOU SOLD ASSIGNED CALLS...") contains "sold" and is
+    # handled by negative_terms below, so check those first.
+    if any(term in action_text for term in negative_terms):
+        return -abs(quantity)
+    if any(term in action_text for term in ("assigned", "expired", "exercise")):
+        return abs(quantity)
     positive_terms = (
         "buy",
         "bought",
@@ -383,8 +390,6 @@ def _signed_quantity(quantity: float, action: str, amount: float | None) -> floa
         "transfer in",
         "journal in",
     )
-    if any(term in action_text for term in negative_terms):
-        return -abs(quantity)
     if any(term in action_text for term in positive_terms):
         return abs(quantity)
     if amount is not None and amount > 0 and "dividend" not in action_text:
