@@ -305,14 +305,20 @@ def score_candidate(
 
     # Expected value / edge of selling this option at the modeled fill, judged against the
     # forecast (realized) volatility. This is the variance-risk-premium harvested (or paid).
+    # With no vol forecast at all the edge is unknowable: keep it None so the EV score stays
+    # neutral (50) instead of treating the whole premium as pure edge.
     expected_value = 0.0
-    edge_per_share = fill_price
+    edge_per_share: float | None = None
     if forecast_vol and underlying_price > 0:
         edge_per_share = option_sale_edge_per_share(
             underlying_price, option.strike, time_years, forecast_vol, option.option_type, fill_price, drift
         )
         expected_value = edge_per_share * 100 * contracts
-    ev_annualized_yield = (edge_per_share / underlying_price) * (365.0 / dte) if underlying_price > 0 else 0.0
+    ev_annualized_yield = (
+        (edge_per_share / underlying_price) * (365.0 / dte)
+        if edge_per_share is not None and underlying_price > 0
+        else 0.0
+    )
 
     # Breakeven + probability of a profitable outcome (covered call / CSP both profit above breakeven).
     if option.option_type == "call":
@@ -330,8 +336,8 @@ def score_candidate(
     iv_score = min((iv or 0.4) / 1.0 * 100, 100)
 
     # EV score: 100 when the premium fully exceeds the expected payout, 50 when fairly priced,
-    # 0 when the expected payout wipes out the premium.
-    ev_score = _clamp(50.0 + (edge_per_share / fill_price) * 50.0) if fill_price > 0 else 50.0
+    # 0 when the expected payout wipes out the premium. Unknown edge stays neutral at 50.
+    ev_score = _clamp(50.0 + (edge_per_share / fill_price) * 50.0) if (edge_per_share is not None and fill_price > 0) else 50.0
     # VRP score: IV relative to realized vol. Ratio 1.0 -> neutral 50, 1.25 -> 100, 0.75 -> 0.
     vrp_ratio = (iv / forecast_vol) if (iv and forecast_vol and forecast_vol > 0) else None
     vrp_score = _clamp((vrp_ratio - 1.0) * 200.0 + 50.0) if vrp_ratio is not None else 50.0
@@ -351,7 +357,7 @@ def score_candidate(
     )
     if rejected:
         total *= 0.45
-    if edge_per_share < 0:
+    if edge_per_share is not None and edge_per_share < 0:
         total *= 0.60
         warnings.append("Implied vol is below realized vol, so the modeled premium does not cover the expected payout (negative edge).")
     if option.option_type == "call" and "bullish breakout" in trend_state and abs_delta >= settings.high_delta_gate:
@@ -360,6 +366,9 @@ def score_candidate(
     if option.option_type == "call" and expected_credit > 0 and abs_delta >= settings.high_delta_gate:
         warnings.append("Higher premium comes with materially lower upside preservation.")
     if assignment_proxy > settings.max_assignment_probability:
+        # Soft penalty, not a hard gate: a genuinely rich option can still win, but it must earn
+        # its way past the configured assignment comfort level instead of merely warning about it.
+        total *= 0.85
         warnings.append(f"Assignment probability proxy ({assignment_proxy:.0%}) exceeds the configured comfort level.")
     if option.option_type == "put":
         warnings.append("Wheel sleeve is in cash/put phase and has only delta-equivalent upside exposure.")

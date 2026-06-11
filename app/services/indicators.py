@@ -50,7 +50,22 @@ def _last(series: pd.Series) -> float | None:
 def calculate_indicators(symbol: str, bars: list[Bar]) -> IndicatorResult:
     warnings: list[str] = []
     if not bars:
-        return IndicatorResult(symbol, datetime.utcnow(), None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, "unknown", "insufficient data", ["No bars available"])
+        return IndicatorResult(
+            symbol=symbol,
+            calculated_at=datetime.utcnow(),
+            price=None,
+            sma_5=None, sma_10=None, sma_20=None, sma_50=None,
+            ema_8=None, ema_21=None,
+            rsi_14=None,
+            macd_line=None, macd_signal=None, macd_histogram=None,
+            bollinger_upper=None, bollinger_middle=None, bollinger_lower=None,
+            atr_14=None,
+            realized_vol_10=None, realized_vol_20=None, realized_vol_60=None,
+            price_vs_20d_high=None, price_vs_20d_low=None,
+            trend_state="unknown",
+            recommendation_bias="insufficient data",
+            warnings=["No bars available"],
+        )
 
     data = pd.DataFrame([bar.model_dump() if hasattr(bar, "model_dump") else bar.dict() for bar in bars])
     data = data.sort_values("date_time")
@@ -166,9 +181,11 @@ def classify_trend(
 
     if above_trend and macd_positive and near_high and 50 <= rsi <= 68:
         return "bullish breakout", "preserve upside; penalize aggressive calls"
-    if above_trend and macd_positive and 50 <= rsi <= 65:
+    # RSI band runs to (not past) 70 so a strong uptrend with RSI 66-69 stays classified as bullish
+    # instead of falling through to neutral/chop and over-covering right when momentum is strongest.
+    if above_trend and macd_positive and 50 <= rsi < 70:
         return "bullish trend", "prefer lower-delta calls"
-    if above_trend and rsi > 70:
+    if above_trend and rsi >= 70:
         return "bullish trend", "price extended; 35-40 delta calls allowed"
     if price < sma20 and price < sma50:
         return "bearish", "avoid forced calls; puts only with re-entry plan"

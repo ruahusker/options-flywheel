@@ -66,6 +66,13 @@ def snapshot_parts(db: Session, snapshot: PortfolioSnapshot):
     holdings = db.execute(select(Holding).where(Holding.snapshot_id == snapshot.id)).scalars().all()
     options = db.execute(select(OptionPosition).where(OptionPosition.snapshot_id == snapshot.id)).scalars().all()
     cash = db.execute(select(CashPosition).where(CashPosition.snapshot_id == snapshot.id)).scalars().all()
+    # An option whose expiration predates the snapshot was already settled (expired/assigned)
+    # when the snapshot was taken — it is not an open position. History-derived imports can
+    # leave such legs behind; filtering here protects every consumer (dashboard, roll, week,
+    # performance) without distorting historical checkpoints, which compare against their own date.
+    snapshot_date = snapshot.created_at.date() if snapshot.created_at else None
+    if snapshot_date is not None:
+        options = [o for o in options if o.expiration is None or o.expiration >= snapshot_date]
     return holdings, options, cash
 
 

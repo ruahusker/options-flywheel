@@ -39,10 +39,36 @@
           <em>target {{ row.posture.coverage_pct|pct }}</em>
         </div>
 
+        {% if row.existing_short_puts > 0 %}
+        <div class="vc-coverage" data-help="Active cash-secured puts — the wheel's cash phase. Collateral is the cash reserved to take assignment at the strikes you sold.">
+          <span>Puts active</span>
+          <strong>{{ row.existing_short_puts }} cash-secured put{{ '' if row.existing_short_puts == 1 else 's' }} · {{ row.put_collateral|money }} collateral</strong>
+          <em>wheel: cash phase</em>
+        </div>
+        {% endif %}
+
         {# ---- THIS WEEK: what to actually do given existing coverage ---- #}
         <div class="vc-block">
           <span class="vc-block-label">This week</span>
-          {% if row.current_add_on.action != "skip trade" %}
+          {% if row.call_management.action == "buy_to_close_and_resell" %}
+            <div class="vc-trade" data-help="The current short calls have captured at least half the original credit, so close them to lock in the profit and shed assignment risk.">
+              Buy to close {{ row.call_management.contracts }} call{{ '' if row.call_management.contracts == 1 else 's' }}
+              <span class="vc-credit">{{ row.call_management.open_profit|money }} open profit · {{ row.call_management.captured_pct|pct }} captured</span>
+            </div>
+            {% set rep = row.call_management.replacement %}
+            {% if rep %}
+            <div class="vc-trade" data-help="{% if row.call_management.roll_to_different_expiration %}Roll target: the richest call across every weekly within the 7-day ceiling, including shorter-dated ones.{% else %}Fresh sale after closing the current calls. This is a separate decision from taking profit.{% endif %}">
+              {% if row.call_management.roll_to_different_expiration %}Roll into{% else %}Then{% endif %} {{ action_label(rep)|lower }}
+              <span class="vc-credit">{{ rep.expected_credit|money }} estimated new credit</span>
+            </div>
+            {% endif %}
+          {% elif row.call_management.action == "buy_to_close_wait" %}
+            <div class="vc-trade" data-help="The current short calls have captured enough premium to close, but the replacement sale should wait.">
+              Buy to close {{ row.call_management.contracts }} call{{ '' if row.call_management.contracts == 1 else 's' }}
+              <span class="vc-credit">{{ row.call_management.open_profit|money }} open profit · {{ row.call_management.captured_pct|pct }} captured</span>
+            </div>
+            <p class="vc-hold">{{ row.call_management.reason }}</p>
+          {% elif row.current_add_on.action != "skip trade" %}
             <div class="vc-trade" data-help="Incremental trade to bring you up to the target sleeve, after counting calls you already hold.">
               {{ action_label(row.current_add_on) }}
               <span class="vc-credit">{{ row.current_add_on.expected_credit|money }} credit</span>
@@ -53,6 +79,37 @@
             <p class="vc-hold">Nothing to add — no qualifying covered call cleared the rules this week.</p>
           {% endif %}
         </div>
+
+        {# ---- CASH-SECURED PUTS: manage the wheel's cash phase ---- #}
+        {% if row.put_management %}
+          {% set pm = row.put_management %}
+          <div class="vc-block">
+            <span class="vc-block-label">Cash-secured puts</span>
+            {% if pm.action == "buy_to_close_and_resell" %}
+              <div class="vc-trade" data-help="The open short puts have captured at least half the original credit; close them to lock in the profit.">
+                Buy to close {{ pm.contracts }} put{{ '' if pm.contracts == 1 else 's' }}
+                <span class="vc-credit">{{ pm.open_profit|money }} open profit · {{ pm.captured_pct|pct }} captured</span>
+              </div>
+              {% if pm.replacement %}
+              <div class="vc-trade" data-help="Re-sell target for the put sleeve, sized to the puts you hold and net-credit checked against the buy-to-close cost.">
+                {% if pm.roll_to_different_expiration %}Roll into{% else %}Then{% endif %} {{ action_label(pm.replacement)|lower }}
+                <span class="vc-credit">{{ pm.replacement.expected_credit|money }} estimated new credit</span>
+              </div>
+              {% endif %}
+            {% elif pm.action == "buy_to_close_wait" %}
+              <div class="vc-trade" data-help="The open short puts have captured enough premium to close, but re-selling should wait.">
+                Buy to close {{ pm.contracts }} put{{ '' if pm.contracts == 1 else 's' }}
+                <span class="vc-credit">{{ pm.open_profit|money }} open profit · {{ pm.captured_pct|pct }} captured</span>
+              </div>
+              <p class="vc-hold">{{ pm.reason }}</p>
+            {% elif pm.action == "hold" %}
+              <p class="vc-hold">Hold your {{ pm.contracts }} short put{{ '' if pm.contracts == 1 else 's' }}{% if pm.average_strike %} near {{ pm.average_strike|money }}{% endif %}{% if pm.expiration %} expiring {{ pm.expiration }}{% endif %} —
+                {% if pm.captured_pct is not none %}{{ pm.captured_pct|pct }} of the credit captured so far;{% endif %} let the premium keep decaying. Assignment puts the shares back on at your strike.</p>
+            {% else %}
+              <p class="vc-hold">{{ pm.reason }}</p>
+            {% endif %}
+          </div>
+        {% endif %}
 
         {# ---- NEXT RESET: the target sleeve to re-establish when current calls expire ---- #}
         <div class="vc-block">
@@ -101,6 +158,17 @@
           {% endif %}
         </div>
 
+        {% if row.sharper_alternative %}
+          {% set alt = row.sharper_alternative %}
+          <div class="vc-block vc-alt">
+            <span class="vc-block-label">Sharper short-dated option</span>
+            <div class="vc-trade" data-help="A shorter or different weekly within the 7-day window scored higher than the standard target on the same risk-adjusted basis (expected value, premium, upside, liquidity). Worth it only if you're ready to manage the faster cycle.">
+              {{ action_label(alt)|lower }}{% if row.sharper_alternative_dte is not none %} · {{ row.sharper_alternative_dte }}-day{% endif %}
+              <span class="vc-credit">~{{ alt.expected_credit|money }} credit · richer risk-adjusted score</span>
+            </div>
+          </div>
+        {% endif %}
+
         <p class="vc-reason">{{ row.posture.reason }}</p>
         {% if c.warnings %}<p class="vc-warn">{{ c.warnings|join("; ") }}</p>{% endif %}
 
@@ -138,6 +206,35 @@
         <div class="rp-item"><span>{{ projection.years }}y</span><strong>{{ projection.ending_value|money }}</strong></div>
       {% endfor %}
     </div>
+    {% if account_premium_allocations %}
+    <div class="routing-accounts">
+      <h3 data-help="The same weekly premium split, broken down by each Fidelity account from the latest import.">By account</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th data-help="Modeled weekly premium assigned to this account from its account-level roll recommendation.">Weekly premium</th>
+            <th>&rarr; SATA</th>
+            <th>&rarr; IBIT</th>
+            <th>&rarr; ASST</th>
+            <th data-help="Cash held back when this account's cash plus pending activity is negative.">Cash reserve</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for account_allocation in account_premium_allocations %}
+          <tr>
+            <td>{{ account_allocation.account.label }}</td>
+            <td>{{ account_allocation.weekly_premium|money }}</td>
+            <td>{{ account_allocation.amount_for("SATA")|money }}</td>
+            <td>{{ account_allocation.amount_for("IBIT")|money }}</td>
+            <td>{{ account_allocation.amount_for("ASST")|money }}</td>
+            <td>{{ account_allocation.amount_for("Cash reserve")|money }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
   </section>
 
   <section class="ask-section">

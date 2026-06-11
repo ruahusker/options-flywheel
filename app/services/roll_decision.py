@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 from app.services.indicators import IndicatorResult
@@ -14,6 +14,28 @@ from app.services.strategy_optimizer import OptimizerSettings, StrategyCandidate
 # Hard ceiling on days-to-expiration: never sell a call further out than this. The owner trades the
 # weekly cycle and does not want to sell upside more than a week ahead.
 MAX_DTE = 7
+# Buy-to-close once at least half the original credit has been captured. Closing early at ~50% locks
+# in the bulk of the premium while shedding the assignment/gamma risk of holding into expiration.
+TAKE_PROFIT_TRIGGER_PCT = 0.50
+CHEAP_BUYBACK_PER_SHARE = 0.05
+# A shorter/different expiration is only surfaced as the better trade when its per-day value beats
+# the standard weekly target's by more than this fraction — small noise should not trigger a roll
+# suggestion, but the comparison is per *calendar day* so short-dated weeklies compete fairly.
+ALTERNATIVE_PER_DAY_MARGIN = 0.20
+
+
+def candidate_per_day_value(candidate: StrategyCandidateResult, dte: int) -> float:
+    """Dollars of value per calendar day of capital commitment.
+
+    The flywheel re-sells as soon as a position expires, so trades on different expirations must be
+    compared per day: a 2-DTE collecting 40% of a 7-DTE's premium is the better trade. Uses the
+    model's expected value (premium minus expected payout) when a vol forecast exists, otherwise
+    falls back to raw credit.
+    """
+    days = max(dte, 1)
+    if candidate.forecast_vol:
+        return candidate.expected_value / days
+    return candidate.expected_credit / days
 
 
 @dataclass(frozen=True)
@@ -25,6 +47,25 @@ class RollPosture:
     dte_max: int
     label: str
     reason: str
+
+
+@dataclass(frozen=True)
+class CoveredCallManagement:
+    action: str
+    label: str
+    reason: str
+    contracts: int = 0
+    average_strike: float | None = None
+    expiration: date | None = None
+    original_credit: float | None = None
+    buyback_cost: float | None = None
+    open_profit: float | None = None
+    captured_pct: float | None = None
+    buyback_mark: float | None = None
+    replacement: StrategyCandidateResult | None = None
+    # True when the re-sell/roll target sits on a different expiration than the calls being closed —
+    # i.e. a genuine calendar roll (often into a shorter, richer weekly) rather than a same-week resell.
+    roll_to_different_expiration: bool = False
 
 
 @dataclass(frozen=True)
@@ -43,6 +84,7 @@ class RollDecisionRow:
     posture: RollPosture
     selected: StrategyCandidateResult
     current_add_on: StrategyCandidateResult
+    call_management: CoveredCallManagement
     sleeve_rows: list[dict]
     put_reentry: StrategyCandidateResult | None
     backtest_hint: HistoricalRollBacktestHint | None
@@ -58,6 +100,18 @@ class RollDecisionRow:
     # strikes were too wide/illiquid to model and the optimizer fell back to the nearest liquid
     # (usually in-the-money) strike. Surfaced as a caution; it normally clears as the week's quotes fill in.
     offband_delta_note: str | None = None
+    # Best risk-adjusted call found across *all* weeklies within the 7-day ceiling (including short
+    # 1-4 DTE expirations), surfaced only when it out-scores the standard weekly target. Lets a juicy
+    # short-dated option be recommended instead of forcing the 5-7 DTE weekly. None when the standard
+    # weekly is already the best available.
+    sharper_alternative: StrategyCandidateResult | None = None
+    sharper_alternative_dte: int | None = None
+    # Active cash-secured puts — the wheel's cash phase. Imported short puts get the same
+    # take-profit/roll management as covered calls, and a symbol that is ALL puts (no shares
+    # after being called away) still gets a row instead of disappearing from the cockpit.
+    existing_short_puts: int = 0
+    put_collateral: float = 0.0
+    put_management: CoveredCallManagement | None = None
 
 
 def choose_roll_expiration(expirations: list[date], *, today: date | None = None, dte_min: int = 5, dte_max: int = MAX_DTE) -> date | None:
@@ -71,6 +125,68 @@ def choose_roll_expiration(expirations: list[date], *, today: date | None = None
         return in_band[0]
     # Nothing as far out as dte_min, but something within the ceiling: take the furthest allowed.
     return within_cap[-1][0]
+
+
+def expirations_within_ceiling(
+    expirations: list[date], *, today: date | None = None, dte_min: int = 1, dte_max: int = MAX_DTE
+) -> list[date]:
+    """Every weekly expiration from dte_min..dte_max days out (capped at the 7-day ceiling), nearest
+    first. Unlike choose_roll_expiration this keeps the *whole* set so shorter weeklies can compete."""
+    today = today or date.today()
+    cap = min(dte_max, MAX_DTE)
+    return [exp for exp in sorted(expirations) if dte_min <= (exp - today).days <= cap]
+
+
+def best_roll_recommendation(
+    *,
+    symbol: str,
+    shares: float,
+    available_cash: float,
+    quote,
+    indicator,
+    posture: RollPosture,
+    provider,
+    expirations: list[date],
+    today: date,
+    existing_short_call_contracts: int,
+    iv_rank: float | None,
+    near_exp: date | None = None,
+    near_chain=None,
+) -> tuple[StrategyCandidateResult | None, date | None]:
+    """Evaluate the best sell-call candidate on *every* weekly within the ceiling — including short
+    1-4 DTE expirations the standard 5-7 DTE search skips — and return the best one with its
+    expiration. Within a chain the optimizer's risk-adjusted score picks the strike; *across*
+    expirations candidates are compared on per-calendar-day value, because the flywheel redeploys
+    immediately after expiry (raw per-trade score systematically favors the longest weekly).
+    Returns (None, None) if nothing clears.
+    """
+    best: StrategyCandidateResult | None = None
+    best_exp: date | None = None
+    best_key: tuple[float, float] | None = None
+    for exp in expirations_within_ceiling(expirations, today=today, dte_min=1, dte_max=posture.dte_max):
+        chain = near_chain if (near_exp is not None and exp == near_exp) else provider.get_option_chain(symbol, exp)
+        if not chain:
+            continue
+        settings = settings_for_posture(posture)
+        settings.dte_min = 1  # let short-dated weeklies through; quality is enforced by the score
+        rec = generate_recommendation(
+            symbol=symbol,
+            shares=shares,
+            available_cash=available_cash,
+            quote=quote,
+            chain=chain,
+            indicators=indicator,
+            settings=settings,
+            existing_short_call_contracts=existing_short_call_contracts,
+            iv_rank=iv_rank,
+        )
+        if rec.best.action == "skip trade":
+            continue
+        dte = max((exp - today).days, 1)
+        key = (candidate_per_day_value(rec.best, dte), rec.best.total_score)
+        if best_key is None or key > best_key:
+            best, best_exp, best_key = rec.best, exp, key
+    return best, best_exp
 
 
 def recommend_roll_posture(indicator: IndicatorResult | None) -> RollPosture:
@@ -135,9 +251,28 @@ def week_verdict(row: "RollDecisionRow") -> WeekVerdict:
     current = row.current_add_on
     edge_label, edge_tone = _edge_read(row.selected)
 
+    if row.call_management.action == "buy_to_close_and_resell":
+        headline = "Buy to close + roll" if row.call_management.roll_to_different_expiration else "Buy to close + re-sell"
+        return WeekVerdict(headline, "sell", edge_label, edge_tone)
+    if row.call_management.action == "buy_to_close_wait":
+        return WeekVerdict("Buy to close", "hold", edge_label, edge_tone)
+
+    # Wheel cash phase: no call action, but active cash-secured puts need managing.
+    put_mgmt = row.put_management
+    if (current is None or current.action == "skip trade") and put_mgmt is not None:
+        if put_mgmt.action == "buy_to_close_and_resell":
+            headline = "Roll puts" if put_mgmt.roll_to_different_expiration else "Buy to close puts + re-sell"
+            return WeekVerdict(headline, "sell", edge_label, edge_tone)
+        if put_mgmt.action == "buy_to_close_wait":
+            return WeekVerdict("Buy to close puts", "hold", edge_label, edge_tone)
+        if put_mgmt.action == "hold":
+            return WeekVerdict("Hold — puts working", "hold", edge_label, edge_tone)
+
     if current is None or current.action == "skip trade":
         if row.existing_short_calls > 0:
             return WeekVerdict("Hold — already covered", "hold", edge_label, edge_tone)
+        if row.existing_short_puts > 0:
+            return WeekVerdict("Puts active", "hold", edge_label, edge_tone)
         return WeekVerdict("No new calls", "skip", edge_label, edge_tone)
 
     count = current.contracts
@@ -186,7 +321,9 @@ def build_roll_decision_rows(metrics, options, provider, db=None) -> tuple[list[
     warnings: list[str] = []
     for symbol in ("IBIT", "ASST"):
         shares = metrics.shares_by_symbol.get(symbol, 0.0)
-        if shares <= 0:
+        existing_short_puts = int(metrics.option_exposure.get(symbol, {}).get("short_puts", 0))
+        # A symbol with no shares but active short puts is the wheel's cash phase — keep its row.
+        if shares <= 0 and existing_short_puts <= 0:
             continue
         try:
             quote = provider.get_quote(symbol)
@@ -262,6 +399,52 @@ def build_roll_decision_rows(metrics, options, provider, db=None) -> tuple[list[
                 existing_short_call_contracts=existing_short_calls,
                 iv_rank=iv_rank,
             )
+            # Best call across *every* weekly within the 7-day ceiling, including short 1-4 DTE ones
+            # the standard 5-7 DTE target skips. Reuse the already-fetched near_exp chain to avoid a
+            # duplicate fetch. This becomes the roll/re-sell target and, when it beats the standard
+            # weekly, a surfaced "sharper short-dated alternative".
+            alt_best, alt_exp = best_roll_recommendation(
+                symbol=symbol,
+                shares=shares,
+                available_cash=metrics.cash_value + metrics.pending_activity,
+                quote=quote,
+                indicator=indicator,
+                posture=posture,
+                provider=provider,
+                expirations=expirations,
+                today=today,
+                existing_short_call_contracts=0,
+                iv_rank=iv_rank,
+                near_exp=near_exp,
+                near_chain=chain,
+            )
+            roll_target = alt_best if alt_best is not None else target_rec.best
+            sharper_alternative = None
+            sharper_alternative_dte = None
+            if (
+                alt_best is not None
+                and alt_exp is not None
+                and alt_exp != near_exp
+                and near_exp is not None
+                and target_rec.best.action != "skip trade"
+            ):
+                # Compare per calendar day so a short-dated weekly competes fairly with the standard
+                # 5-7 DTE target; require a clear margin so quote noise does not trigger a roll.
+                alt_pd = candidate_per_day_value(alt_best, max((alt_exp - today).days, 1))
+                std_pd = candidate_per_day_value(target_rec.best, max((near_exp - today).days, 1))
+                if alt_pd > std_pd + ALTERNATIVE_PER_DAY_MARGIN * max(abs(std_pd), 1.0):
+                    sharper_alternative = alt_best
+                    sharper_alternative_dte = (alt_exp - today).days
+            elif alt_best is not None and alt_exp is not None and alt_exp != near_exp and target_rec.best.action == "skip trade":
+                # The standard weekly had no qualifying call, but a shorter weekly does — surface it.
+                sharper_alternative = alt_best
+                sharper_alternative_dte = (alt_exp - today).days
+            call_management = covered_call_management(
+                symbol=symbol,
+                options=options,
+                replacement=roll_target,
+                posture=posture,
+            )
             sleeve_rows = []
             for coverage in (0.25, 0.35, 0.50):
                 sleeve_settings = settings_for_posture(posture, coverage_pct=coverage)
@@ -286,10 +469,16 @@ def build_roll_decision_rows(metrics, options, provider, db=None) -> tuple[list[
                         "score": rec.best.total_score,
                     }
                 )
+            put_collateral = sum(
+                opt.contracts * 100 * opt.strike
+                for opt in options
+                if opt.underlying == symbol and opt.option_type == "put" and opt.side == "short" and opt.contracts > 0
+            )
             put_rec = generate_recommendation(
                 symbol=symbol,
-                shares=max(existing_short_calls * 100, 100 if shares >= 100 else 0),
-                available_cash=assignment_cash(symbol, options),
+                shares=max(existing_short_calls * 100, existing_short_puts * 100, 100 if shares >= 100 else 0),
+                # Cash freed by call assignment plus the cash already securing the open puts.
+                available_cash=assignment_cash(symbol, options) + put_collateral,
                 quote=quote,
                 chain=chain,
                 indicators=indicator,
@@ -297,6 +486,31 @@ def build_roll_decision_rows(metrics, options, provider, db=None) -> tuple[list[
                 wheel_in_cash=True,
                 existing_short_call_contracts=0,
             )
+            # Re-sell target for the open puts: the put re-entry pick, scaled to the number of
+            # puts actually held so the management block compares like for like.
+            put_replacement = put_rec.best
+            if (
+                existing_short_puts > 0
+                and put_replacement.action == "sell put"
+                and put_replacement.contracts not in (0, existing_short_puts)
+            ):
+                factor = existing_short_puts / put_replacement.contracts
+                put_replacement = replace(
+                    put_replacement,
+                    contracts=existing_short_puts,
+                    expected_credit=put_replacement.expected_credit * factor,
+                    expected_value=put_replacement.expected_value * factor,
+                    collateral_required=put_replacement.collateral_required * factor,
+                )
+            put_management = (
+                short_put_management(symbol=symbol, options=options, replacement=put_replacement, posture=posture)
+                if existing_short_puts > 0
+                else None
+            )
+            # Wheel in cash phase: the recurring premium comes from rolling the puts, so the SATA
+            # routing/projection doesn't collapse to $0 while waiting for reassignment.
+            if recurring_weekly_premium <= 0 and existing_short_puts > 0 and put_replacement.action != "skip trade":
+                recurring_weekly_premium = put_replacement.expected_credit
             rows.append(
                 RollDecisionRow(
                     symbol=symbol,
@@ -313,6 +527,7 @@ def build_roll_decision_rows(metrics, options, provider, db=None) -> tuple[list[
                     posture=posture,
                     selected=target_rec.best,
                     current_add_on=current_rec.best,
+                    call_management=call_management,
                     sleeve_rows=sleeve_rows,
                     put_reentry=put_rec.best,
                     backtest_hint=backtest_hint,
@@ -321,11 +536,199 @@ def build_roll_decision_rows(metrics, options, provider, db=None) -> tuple[list[
                     reset_expiration=reset_exp,
                     recurring_weekly_premium=recurring_weekly_premium,
                     offband_delta_note=offband_delta_note(target_rec.best, posture, quote.price),
+                    sharper_alternative=sharper_alternative,
+                    sharper_alternative_dte=sharper_alternative_dte,
+                    existing_short_puts=existing_short_puts,
+                    put_collateral=put_collateral,
+                    put_management=put_management,
                 )
             )
         except Exception as exc:
             warnings.append(f"{symbol}: {exc}")
     return rows, warnings
+
+
+def covered_call_management(
+    *,
+    symbol: str,
+    options,
+    replacement: StrategyCandidateResult,
+    posture: RollPosture,
+) -> CoveredCallManagement:
+    return short_option_management(
+        symbol=symbol, options=options, replacement=replacement, posture=posture, option_type="call"
+    )
+
+
+def short_put_management(
+    *,
+    symbol: str,
+    options,
+    replacement: StrategyCandidateResult,
+    posture: RollPosture,
+) -> CoveredCallManagement:
+    """Same take-profit/roll engine as covered calls, applied to active cash-secured puts —
+    the wheel's cash phase. The replacement is the put re-entry candidate sized to the open puts."""
+    return short_option_management(
+        symbol=symbol, options=options, replacement=replacement, posture=posture, option_type="put"
+    )
+
+
+def short_option_management(
+    *,
+    symbol: str,
+    options,
+    replacement: StrategyCandidateResult,
+    posture: RollPosture,
+    option_type: str,
+) -> CoveredCallManagement:
+    word = "call" if option_type == "call" else "put"
+    short_legs = [
+        option
+        for option in options
+        if option.underlying == symbol
+        and option.option_type == option_type
+        and option.side == "short"
+        and option.contracts > 0
+    ]
+    if not short_legs:
+        return CoveredCallManagement(
+            "none", f"No short {word}s", f"No active short {word}s were imported."
+        )
+
+    contracts = sum(option.contracts for option in short_legs)
+    avg_strike = sum(option.contracts * option.strike for option in short_legs) / contracts if contracts else None
+    expiration = max(option.expiration for option in short_legs if option.expiration) if short_legs else None
+    original_credit = 0.0
+    buyback_cost = 0.0
+    for option in short_legs:
+        original = _original_credit_per_share(option)
+        mark = _buyback_mark_per_share(option)
+        if original is None or original <= 0 or mark is None or mark < 0:
+            return CoveredCallManagement(
+                "unavailable",
+                "Premium capture unavailable",
+                f"Imported short {word}s are missing original credit or current mark, so the app cannot score a buy-to-close trigger.",
+                contracts=contracts,
+                average_strike=avg_strike,
+                expiration=expiration,
+            )
+        original_credit += original * option.contracts * 100
+        buyback_cost += mark * option.contracts * 100
+
+    if original_credit <= 0:
+        return CoveredCallManagement(
+            "unavailable",
+            "Premium capture unavailable",
+            "Original short-call credit is unavailable or zero.",
+            contracts=contracts,
+            average_strike=avg_strike,
+            expiration=expiration,
+        )
+
+    open_profit = original_credit - buyback_cost
+    captured_pct = open_profit / original_credit
+    buyback_mark = buyback_cost / (contracts * 100) if contracts else None
+    replacement_ok = replacement.action != "skip trade" and replacement.option_type == option_type and replacement.contracts > 0
+    # Re-selling only makes sense as a net-credit roll: the new sale must bring in more per share
+    # than the buy-to-close costs. Otherwise closing pays away the remaining theta and the
+    # "replacement" does not even cover the exit — wait for the next weekly to price up instead.
+    replacement_per_share = (
+        replacement.expected_credit / (replacement.contracts * 100)
+        if replacement_ok and replacement.contracts
+        else None
+    )
+    net_credit_roll = (
+        replacement_per_share is not None
+        and buyback_mark is not None
+        and replacement_per_share > buyback_mark
+    )
+    rolls_to_new_expiration = (
+        replacement_ok
+        and replacement.expiration is not None
+        and expiration is not None
+        and replacement.expiration != expiration
+    )
+    close_triggered = captured_pct >= TAKE_PROFIT_TRIGGER_PCT or (
+        buyback_mark is not None and buyback_mark <= CHEAP_BUYBACK_PER_SHARE
+    )
+
+    common = {
+        "contracts": contracts,
+        "average_strike": avg_strike,
+        "expiration": expiration,
+        "original_credit": original_credit,
+        "buyback_cost": buyback_cost,
+        "open_profit": open_profit,
+        "captured_pct": captured_pct,
+        "buyback_mark": buyback_mark,
+        "replacement": replacement if replacement_ok else None,
+        "roll_to_different_expiration": rolls_to_new_expiration,
+    }
+    prefer_wait = option_type == "call" and _prefer_wait_after_close(posture, replacement, avg_strike)
+    if close_triggered:
+        if replacement_ok and net_credit_roll and not prefer_wait:
+            if rolls_to_new_expiration:
+                label = "Buy to close; roll to the richer weekly"
+                reason = (
+                    f"Short {word}s have captured at least half the original credit. Close them and roll into the "
+                    f"{replacement.expiration} weekly — it scored best across the expirations within the 7-day "
+                    "ceiling, so the capital re-deploys into a juicier strike/delta instead of a same-week resell."
+                )
+            else:
+                label = "Buy to close; re-sell only if target still clears"
+                reason = (
+                    f"Short {word}s have captured at least half the original credit. Close them, then re-sell only "
+                    "because the reset candidate still clears the optimizer."
+                )
+            return CoveredCallManagement("buy_to_close_and_resell", label, reason, **common)
+        if replacement_ok and not net_credit_roll:
+            wait_reason = (
+                f"Short {word}s have captured at least half the original credit, but re-selling now would be a "
+                "net-debit roll: the replacement's credit does not cover the buy-to-close cost. Close to shed "
+                "the gamma/assignment risk and wait for the next weekly to price up before re-selling."
+            )
+        else:
+            wait_reason = (
+                f"Short {word}s have captured at least half the original credit, but the replacement setup is "
+                "not strong enough or would roll down into an upside-first setup."
+            )
+        return CoveredCallManagement(
+            "buy_to_close_wait",
+            "Buy to close; wait before re-selling",
+            wait_reason,
+            **common,
+        )
+    return CoveredCallManagement(
+        "hold",
+        f"Hold current {word}s",
+        f"Short {word}s have not captured at least half the original credit yet, so let the premium keep decaying.",
+        **common,
+    )
+
+
+def _original_credit_per_share(option) -> float | None:
+    value = option.average_cost_basis
+    if value is None:
+        return None
+    return abs(float(value))
+
+
+def _buyback_mark_per_share(option) -> float | None:
+    if option.last_price is not None:
+        return abs(float(option.last_price))
+    if option.current_value is not None and option.contracts:
+        return abs(float(option.current_value)) / (option.contracts * 100)
+    return None
+
+
+def _prefer_wait_after_close(posture: RollPosture, replacement: StrategyCandidateResult, average_strike: float | None) -> bool:
+    if replacement.strike is None or average_strike is None:
+        return False
+    if replacement.strike >= average_strike:
+        return False
+    base_label = posture.label.split("+", 1)[0].strip()
+    return base_label in {"Oversold", "Defensive", "Upside-first"}
 
 
 def apply_backtest_hint(posture: RollPosture, hint: HistoricalRollBacktestHint | None) -> RollPosture:

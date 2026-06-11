@@ -85,11 +85,13 @@ def build_week(db: Session, provider: MarketDataProvider) -> dict:
     metrics = calculate_dashboard_metrics(snapshot, holdings, options, cash_positions)
     sata_settings = get_sata_settings(db)
     rows, roll_warnings = build_roll_decision_rows(metrics, options, provider, db)
+    account_rows, account_warnings = build_account_roll_recommendations(db, rows, holdings, options)
 
     weekly_premium = sum(row.recurring_weekly_premium for row in rows)
     metrics.estimated_weekly_premium = weekly_premium
     metrics.estimated_annual_premium = weekly_premium * 52
     premium_allocation = build_premium_allocation(metrics, rows)
+    account_premium_allocations = build_account_premium_allocations(premium_allocation, account_rows)
     projections = project_multiple_horizons(
         initial_value=metrics.sata_value,
         weekly_contribution=premium_allocation.amount_for("SATA"),
@@ -104,9 +106,10 @@ def build_week(db: Session, provider: MarketDataProvider) -> dict:
         "metrics": metrics,
         "rows": rows,
         "premium_allocation": premium_allocation,
+        "account_premium_allocations": account_premium_allocations,
         "projections": projections,
         "sata_settings": _detach(sata_settings),
-        "warnings": metrics.warnings + roll_warnings,
+        "warnings": metrics.warnings + roll_warnings + account_warnings,
     }
 
 
@@ -354,8 +357,13 @@ def _snapshot_id(page: str, db: Session) -> int:
     return snapshot.id if snapshot else 0
 
 
+# Bump whenever a payload dataclass gains fields the templates rely on: old pickles unpickle
+# cleanly but without the new attributes, which would 500 the page. A mismatch is a cache miss.
+CACHE_SCHEMA_VERSION = 3
+
+
 def store(db: Session, page: str, snapshot_id: int, payload: dict, market_refreshed_at: datetime | None) -> None:
-    blob = pickle.dumps(payload)
+    blob = pickle.dumps({**payload, "__schema__": CACHE_SCHEMA_VERSION})
     existing = db.query(PrecomputeCache).filter_by(page=page, snapshot_id=snapshot_id).one_or_none()
     if existing is not None:
         existing.payload = blob
@@ -379,10 +387,13 @@ def load(db: Session, page: str, snapshot_id: int) -> dict | None:
     if row is None:
         return None
     try:
-        return pickle.loads(row.payload)
+        payload = pickle.loads(row.payload)
     except Exception:
         # Pickle/version drift -> treat as a cache miss so the caller rebuilds; never a 500.
         return None
+    if payload.pop("__schema__", None) != CACHE_SCHEMA_VERSION:
+        return None
+    return payload
 
 
 def load_or_build(page: str, db: Session) -> dict:

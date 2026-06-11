@@ -39,6 +39,7 @@ def analyze_scenario(
     sata_projected_value: float,
     sleeve_effective_delta: float,
     sata_starting_value: float = 0.0,
+    annual_cap: float = 0.35,
 ) -> ScenarioResult:
     buy_hold_value = starting_ibit_asst_value * (1 + scenario_return) + other_assets_value + sata_starting_value
     total_start = starting_ibit_asst_value + other_assets_value + sata_starting_value
@@ -49,7 +50,9 @@ def analyze_scenario(
     # so we must NOT additionally scale by sleeve_effective_delta (that double-counted the cap and
     # understated the sleeve). The cap is compounded over the horizon to match the total-return
     # scenarios, not applied linearly.
-    compound_cap = (1.0 + 0.35) ** years - 1.0
+    # annual_cap approximates how far the weekly-rolled covered strikes let the sleeve run per
+    # year before assignment truncates the move; tune it to the posture's delta if needed.
+    compound_cap = (1.0 + annual_cap) ** years - 1.0
     capped_return = min(scenario_return, compound_cap)
     optioned_strategy_value = optioned_value * (1 + capped_return)
     untouched_strategy_value = untouched_value * (1 + scenario_return)
@@ -88,6 +91,7 @@ def analyze_default_scenarios(
     sata_values_by_year: dict[int, float],
     sleeve_effective_delta: float = 0.65,
     sata_starting_value: float = 0.0,
+    annual_cap: float = 0.35,
 ) -> list[ScenarioResult]:
     results: list[ScenarioResult] = []
     for years in (1, 3, 5):
@@ -104,6 +108,7 @@ def analyze_default_scenarios(
                     sata_projected_value=sata_values_by_year.get(years, 0.0),
                     sleeve_effective_delta=sleeve_effective_delta,
                     sata_starting_value=sata_starting_value,
+                    annual_cap=annual_cap,
                 )
             )
     return results

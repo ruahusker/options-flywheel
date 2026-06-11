@@ -98,9 +98,27 @@
             <strong>{{ row.current_covered_pct|pct }} / {{ row.existing_short_calls }} calls</strong>
           </div>
           <div>
+            <span>Profit action <button class="info-tip" type="button" aria-label="Buy-to-close logic based on imported original credit versus current buyback mark. Closing and re-selling are evaluated separately.">?</button></span>
+            <strong>{{ row.call_management.label }}</strong>
+          </div>
+          <div>
+            <span>Captured <button class="info-tip" type="button" aria-label="Percent of original short-call premium already captured. Buy-to-close triggers once at least 50% is captured (or the buyback is only a few cents).">?</button></span>
+            <strong>{% if row.call_management.captured_pct is not none %}{{ row.call_management.captured_pct|pct }}{% else %}-{% endif %}</strong>
+          </div>
+          <div>
             <span>Current add-on</span>
             <strong>{{ row.current_add_on.action }}</strong>
           </div>
+          <div>
+            <span>Active short puts <button class="info-tip" type="button" aria-label="Cash-secured puts currently imported for this underlying — the wheel's cash phase — with the cash collateral reserved for assignment.">?</button></span>
+            <strong>{{ row.existing_short_puts }}{% if row.put_collateral %} / {{ row.put_collateral|money }}{% endif %}</strong>
+          </div>
+          {% if row.put_management %}
+          <div>
+            <span>Put action <button class="info-tip" type="button" aria-label="Same buy-to-close logic as covered calls, applied to the open short puts: close once at least 50% of the original credit is captured, re-sell only on a net-credit roll.">?</button></span>
+            <strong>{{ row.put_management.label }}</strong>
+          </div>
+          {% endif %}
           <div>
             <span>Technical pattern <button class="info-tip" type="button" aria-label="Current trend classification from price, moving averages, RSI, MACD, and recent high/low context.">?</button></span>
             <strong>{{ row.trend_state }}</strong>
@@ -110,6 +128,12 @@
             <strong>{{ row.rsi_14|num }}</strong>
           </div>
         </div>
+        {% if row.call_management.action in ["buy_to_close_and_resell", "buy_to_close_wait", "unavailable"] %}
+          <p class="decision-reason">{{ row.call_management.reason }}</p>
+        {% endif %}
+        {% if row.put_management and row.put_management.action in ["buy_to_close_and_resell", "buy_to_close_wait", "unavailable"] %}
+          <p class="decision-reason">{{ row.put_management.reason }}</p>
+        {% endif %}
       </article>
     {% endfor %}
   </section>
