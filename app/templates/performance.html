@@ -3,121 +3,119 @@
 {% block content %}
 <section class="page-head">
   <div>
-    <h1>Strategy Performance vs Buy &amp; Hold</h1>
-    <p>Track your actual flywheel net worth (true_strategy_value, including all premiums routed into SATA) against a buy-and-hold counterfactual on the same initial IBIT/ASST shares using your imported snapshot history.</p>
+    <h1>Performance</h1>
+    <p>Your option trades round-tripped from open to close: premium taken in, what closing cost, the net P/L, and the annualized pace over any date range. The strategy-vs-buy-and-hold comparison for the same range sits below.</p>
   </div>
 </section>
 
 {% if not has_data %}
-  <section class="empty">No portfolio snapshots yet. <a href="{{ base_path }}/uploads">Upload positions</a> (or history) to begin tracking.</section>
+  <section class="empty">No trades or snapshots yet. <a href="{{ base_path }}/uploads">Upload positions or account history</a> to begin tracking.</section>
 {% else %}
   <section>
     <form method="get" class="settings-grid">
-      <label>Start snapshot
-        <select name="start">
-          {% for s in available_snapshots %}
-            <option value="{{ s.id }}" {% if selected_start == s.id %}selected{% endif %}>
-              {{ s.created_at.strftime('%Y-%m-%d %H:%M') }} — {{ s.source_filename or 'snapshot' }} ({{ s.total_value|money if s.total_value else '' }})
-            </option>
-          {% endfor %}
-        </select>
+      <label data-help="First day of the range. Defaults to your first journal trade.">Start date
+        <input type="date" name="start" value="{{ start_value }}">
       </label>
-      <label>End snapshot
-        <select name="end">
-          {% for s in available_snapshots %}
-            <option value="{{ s.id }}" {% if selected_end == s.id or (not selected_end and loop.last) %}selected{% endif %}>
-              {{ s.created_at.strftime('%Y-%m-%d %H:%M') }} — {{ s.source_filename or 'snapshot' }} ({{ s.total_value|money if s.total_value else '' }})
-            </option>
-          {% endfor %}
-        </select>
+      <label data-help="Last day of the range. Defaults to your most recent journal trade.">End date
+        <input type="date" name="end" value="{{ end_value }}">
       </label>
       <button type="submit">Update Range</button>
-      <a class="button secondary" href="{{ base_path }}/performance">Reset to all</a>
+      <a class="button secondary" href="{{ base_path }}/performance?days=7">7d</a>
+      <a class="button secondary" href="{{ base_path }}/performance?days=30">30d</a>
+      <a class="button secondary" href="{{ base_path }}/performance?days=90">90d</a>
+      <a class="button secondary" href="{{ base_path }}/performance">All</a>
     </form>
   </section>
 
-  {% if summary.error %}
-    <section class="empty">{{ summary.error }}</section>
-  {% else %}
-    <section class="metric-grid">
-      <div>
-        <span>Strategy P/L (period)</span>
-        <strong class="{{ 'pos' if summary.strategy_pnl >= 0 else 'neg' }}">{{ summary.strategy_pnl|money }}</strong>
-        <em>{{ summary.strategy_pct }}%</em>
-      </div>
-      <div>
-        <span>B&amp;H equivalent (initial shares)</span>
-        <strong>{{ summary.end_bnh_value|money }}</strong>
-        <em>on {{ summary.base_ibit_shares|num }} IBIT + {{ summary.base_asst_shares|num }} ASST</em>
-      </div>
-      <div>
-        <span>Out/under vs B&amp;H</span>
-        <strong class="{{ 'pos' if summary.outperformance_vs_bnh >= 0 else 'neg' }}">{{ summary.outperformance_vs_bnh|money }}</strong>
-      </div>
-      <div>
-        <span>Net option premiums (journal)</span>
-        <strong>{{ journal_premiums.net_credit_debit|money }}</strong>
-        <em>{{ journal_premiums.count }} option trades in range</em>
-      </div>
-      <div>
-        <span>Start → End</span>
-        <strong>{{ summary.start_date }} → {{ summary.end_date }}</strong>
-      </div>
-      <div>
-        <span>Ending strategy value</span>
-        <strong>{{ summary.end_strategy_value|money }}</strong>
-      </div>
-    </section>
+  <section class="metric-grid">
+    <div>
+      <span data-help="Net option cash flow inside the range: premium from sells minus the cost of buy-to-closes.">Net premium (range)</span>
+      <strong class="{{ 'pos' if stats.net_premium >= 0 else 'neg' }}">{{ stats.net_premium|money }}</strong>
+      <em>{{ stats.premium_collected|money }} collected − {{ stats.buyback_cost|money }} buybacks · {{ stats.trade_flows }} fills</em>
+    </div>
+    <div>
+      <span data-help="Net option P/L of trades that finished (expired, assigned, or bought back) inside the range, including premium collected before the range started.">Realized P/L (closed trades)</span>
+      <strong class="{{ 'pos' if stats.realized_pnl >= 0 else 'neg' }}">{{ stats.realized_pnl|money }}</strong>
+      <em>{{ stats.closed_rounds }} trades closed in range</em>
+    </div>
+    <div>
+      <span data-help="Trades still open right now, and the net premium currently held on them (kept if they expire worthless).">Open trades</span>
+      <strong>{{ stats.open_rounds }}</strong>
+      <em>{{ stats.open_premium|money }} premium held</em>
+    </div>
+    <div>
+      <span data-help="Net premium in the range scaled to a 365-day pace. Short ranges extrapolate a small sample — treat as a pace, not a forecast.">Annualized pace</span>
+      <strong>{{ stats.annualized_dollars|money }}</strong>
+      <em>over {{ stats.days }} day{{ '' if stats.days == 1 else 's' }}</em>
+    </div>
+    {% if stats.annualized_pct is not none %}
+    <div>
+      <span data-help="The annualized premium pace as a percent of strategy value at the start of the range.">Annualized return</span>
+      <strong>{{ "%.1f"|format(stats.annualized_pct) }}%</strong>
+      <em>of {{ stats.base_value|money }} at range start</em>
+    </div>
+    {% endif %}
+    <div>
+      <span>Range</span>
+      <strong>{{ stats.start.strftime('%Y-%m-%d') }} → {{ stats.end.strftime('%Y-%m-%d') }}</strong>
+    </div>
+  </section>
 
-    <section>
-      <h2>Checkpoint history (Strategy NAV vs B&amp;H NAV)</h2>
-      <p class="section-sub">{{ summary.note }}</p>
+  <section>
+    <h2>Trades</h2>
+    <p class="section-sub" data-help="One row per position: every journal fill for the same account, underlying, type, strike, and expiration paired from open to close. P/L is option cash flow only — share-level effects of assignment show in the chart below.">
+      Trades active inside the selected range, newest first.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Opened</th>
+          <th>Closed</th>
+          <th>Account</th>
+          <th>Trade</th>
+          <th data-help="Contracts opened in this position.">Qty</th>
+          <th data-help="Cash collected from selling (or from sell-to-close on long positions).">Premium</th>
+          <th data-help="Cash paid to buy back (or the cost of opening a long position).">Buyback</th>
+          <th data-help="Premium minus buyback: the option leg's net cash P/L.">Net P/L</th>
+          <th data-help="How the position ended. Assigned and expired both keep the full premium.">Outcome</th>
+          <th data-help="Calendar days from open to close (or to today while open).">Days</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for trade in trades %}
+        <tr class="{% if trade.outcome == 'open' %}{% elif trade.net_pnl >= 0 %}positive{% else %}negative{% endif %}">
+          <td>{{ trade.opened_at.strftime('%Y-%m-%d') if trade.opened_at else '—' }}</td>
+          <td>{{ trade.closed_at.strftime('%Y-%m-%d') if trade.closed_at else 'open' }}</td>
+          <td>{{ trade.account_name }}</td>
+          <td>{{ trade.side }} {{ trade.ticker }} {{ trade.option_type }} {{ trade.strike|money }} exp {{ trade.expiration or '—' }}</td>
+          <td>{{ trade.contracts }}</td>
+          <td>{{ trade.premium_collected|money }}</td>
+          <td>{{ trade.buyback_cost|money }}</td>
+          <td><strong>{{ trade.net_pnl|money }}</strong></td>
+          <td>{{ trade.outcome }}</td>
+          <td>{{ trade.days_held }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10">No option trades in this range.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
 
-      <div class="chart-container" style="margin: 12px 0 20px; max-width: 100%;">
-        <canvas id="perf-chart" height="110"></canvas>
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>Date</th>
-            <th>Source</th>
-            <th>Strategy NAV</th>
-            <th>B&amp;H NAV (fixed start shares)</th>
-            <th>Diff (Strategy - B&amp;H)</th>
-            <th>SATA</th>
-            <th>Short calls / puts</th>
-            <th>IBIT / ASST shares @ price</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for cp in checkpoints %}
-          <tr class="{% if cp.diff >= 0 %}positive{% else %}negative{% endif %}">
-            <td>{{ cp.date_label }}</td>
-            <td class="mono" style="font-size:11px; max-width:220px; overflow:hidden; text-overflow:ellipsis;">{{ cp.source }}</td>
-            <td><strong>{{ cp.strategy_value|money }}</strong></td>
-            <td>{{ cp.bnh_value|money }}</td>
-            <td><strong>{{ cp.diff|money }}</strong></td>
-            <td>{{ cp.sata_value|money }}</td>
-            <td>{{ cp.short_calls }} / {{ cp.short_puts }}</td>
-            <td>{{ cp.ibit_shares|num }} @ {{ cp.ibit_price|money }} / {{ cp.asst_shares|num }} @ {{ cp.asst_price|money }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </section>
-
-    <section class="notice">
-      <h3 style="margin-top:0;">How this is calculated</h3>
-      <ul style="margin:8px 0 0 18px; line-height:1.45;">
-        <li><strong>Strategy NAV</strong> at each checkpoint = <code>true_strategy_value</code> (long positions ex-SATA + SATA + cash/pending − short option MTM + long option MTM). This is your actual economic net worth under the flywheel at import time.</li>
-        <li><strong>B&amp;H NAV</strong> = (IBIT shares at period start × price at this checkpoint) + (ASST shares at period start × price at this checkpoint) + sidecar value from the start snapshot (SATA + cash + initial option effects, with no premiums added during the period and no short option liability).</li>
-        <li>Positive "Diff" means the flywheel (premiums collected + any other effects) has the account ahead of simply holding those starting shares unoptioned + the starting sidecar.</li>
-        <li>New share purchases or capital added after the chosen start are <em>not</em> included in the B&amp;H line above (choose a later start snapshot after big additions if you want to normalize the comparison).</li>
-        <li>Journal premiums are the net credit/debit on option trades in the date window — the main "extra" generated by the strategy that flows into SATA or is otherwise available.</li>
-      </ul>
-      <p style="margin-top:8px;">This is realized, point-in-time tracking from the snapshots you have imported. It complements the forward-looking Scenarios and Monte Carlo pages.</p>
-    </section>
+  {% if checkpoints and not summary.error %}
+  <section>
+    <h2>Strategy vs Buy &amp; Hold</h2>
+    <p class="section-sub" data-help="Strategy NAV is your actual net worth at each imported snapshot. B&H holds the IBIT/ASST/BTCFX/BSOL share counts from the range start at each later checkpoint's prices (symbols sold during the period keep their last seen price), plus the starting sidecar (SATA/cash) with no premiums added. 'vs B&H' is the gap: how much better (+) or worse (-) the strategy did than just holding — what the option activity earned or cost, including assignment effects.">
+      {{ summary.start_date }} → {{ summary.end_date }} ·
+      strategy P/L <strong class="{{ 'pos' if summary.strategy_pnl >= 0 else 'neg' }}">{{ summary.strategy_pnl|money }}</strong> ({{ summary.strategy_pct }}%) ·
+      B&amp;H P/L <strong class="{{ 'pos' if summary.bnh_pnl >= 0 else 'neg' }}">{{ summary.bnh_pnl|money }}</strong> ·
+      vs B&amp;H <strong class="{{ 'pos' if summary.outperformance_vs_bnh >= 0 else 'neg' }}">{{ summary.outperformance_vs_bnh|money }}</strong>
+    </p>
+    <div class="chart-container" style="margin: 12px 0 8px; max-width: 100%;">
+      <canvas id="perf-chart" height="110"></canvas>
+    </div>
+    <p class="section-sub">New capital added after the range start is not in the B&amp;H line — pick a later start date after big additions to normalize the comparison.</p>
+  </section>
   {% endif %}
 {% endif %}
 
@@ -128,18 +126,14 @@
   const ctx = document.getElementById('perf-chart');
   if (!ctx || !window.Chart) return;
 
-  const labels = data.map(d => d.date_label);
-  const strat = data.map(d => d.strategy_value);
-  const bnh = data.map(d => d.bnh_value);
-
   new Chart(ctx, {
     type: 'line',
     data: {
-      labels: labels,
+      labels: data.map(d => d.date_label),
       datasets: [
         {
           label: 'Strategy NAV (actual)',
-          data: strat,
+          data: data.map(d => d.strategy_value),
           borderColor: (window.FLYWHEEL || {}).mint || '#46e0a8',
           backgroundColor: (window.FLYWHEEL || {}).mintSoft || 'rgba(70,224,168,0.10)',
           fill: true,
@@ -149,7 +143,7 @@
         },
         {
           label: 'B&H (initial shares + start sidecar)',
-          data: bnh,
+          data: data.map(d => d.bnh_value),
           borderColor: (window.FLYWHEEL || {}).brass || '#dca157',
           backgroundColor: (window.FLYWHEEL || {}).brassSoft || 'rgba(220,161,87,0.08)',
           tension: 0.25,

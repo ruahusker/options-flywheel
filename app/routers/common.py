@@ -7,7 +7,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.portfolio import CashPosition, Holding, OptionPosition, PortfolioSnapshot
+from app.models.portfolio import CashPosition, Holding, OptionPosition, PortfolioSnapshot, is_position_snapshot
 from app.models.settings import SATASettings
 
 
@@ -59,7 +59,14 @@ templates.env.globals["data_asof_iso"] = data_asof_iso
 
 
 def latest_snapshot(db: Session) -> PortfolioSnapshot | None:
-    return db.execute(select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.created_at))).scalars().first()
+    """Newest positions-export snapshot. History-derived snapshots carry stale transaction
+    prices and must not become the dashboard's view of the portfolio; they are only a fallback
+    when no positions export has ever been imported."""
+    snapshots = db.execute(select(PortfolioSnapshot).order_by(desc(PortfolioSnapshot.created_at))).scalars().all()
+    for snapshot in snapshots:
+        if is_position_snapshot(snapshot):
+            return snapshot
+    return snapshots[0] if snapshots else None
 
 
 def snapshot_parts(db: Session, snapshot: PortfolioSnapshot):

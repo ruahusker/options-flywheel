@@ -18,6 +18,7 @@ from app.routers.common import templates
 from app.services import precompute
 from app.services.account_names import canonical_account, canonical_account_name
 from app.services.fidelity_history_parser import FidelityAccountHistoryCsvParser
+from app.services.journal_dedupe import AMOUNT_TOL, collapse_dual_section
 from app.services.fidelity_parser import FidelityPositionsCsvParser
 from app.services.market_data.cached_provider import CachedProvider
 
@@ -79,7 +80,7 @@ def import_upload(
     if file_kind in {"fidelity_positions", "fidelity_history"}:
         parser = FidelityPositionsCsvParser() if file_kind == "fidelity_positions" else FidelityAccountHistoryCsvParser()
         parsed = parser.parse_text(text)
-        _import_parsed_portfolio(db, parsed, filename)
+        _import_parsed_portfolio(db, parsed, filename, file_kind)
         warnings.extend(parsed.diagnostics.warnings)
         imported = parsed.diagnostics.rows_imported
         if isinstance(parser, FidelityAccountHistoryCsvParser):
@@ -111,13 +112,14 @@ def import_upload(
     )
 
 
-def _import_parsed_portfolio(db: Session, parsed, filename: str) -> None:
+def _import_parsed_portfolio(db: Session, parsed, filename: str, file_kind: str) -> None:
     snapshot = PortfolioSnapshot(
         source_filename=filename,
         account_number=parsed.account_number,
         account_name=canonical_account_name(parsed.account_number, parsed.account_name),
         tax_status="tax_free",
         total_value=parsed.diagnostics.total_account_value,
+        notes=file_kind,  # is_position_snapshot reads this to keep stale history prices off dashboards
     )
     db.add(snapshot)
     db.flush()
@@ -178,6 +180,9 @@ def _import_parsed_portfolio(db: Session, parsed, filename: str) -> None:
 
 def _import_history_journal_entries(db: Session, entries) -> int:
     imported = 0
+    # Some Fidelity history exports list every transaction twice (a combined section plus
+    # per-account sections); collapse those before touching the database.
+    entries = collapse_dual_section(list(entries), sort_key=lambda item: item.created_at)
     for item in entries:
         account_number, account_name = canonical_account(item.account_number, item.account_name)
         entry = TradeJournalEntry(
@@ -196,9 +201,11 @@ def _import_history_journal_entries(db: Session, entries) -> int:
         )
         # Dedup on the transaction itself, NOT on notes: notes embed the source filename and
         # line number, so the same trade re-imported from an overlapping history export looked
-        # "new" and double-counted premiums on the Performance page.
-        existing = db.execute(
-            select(TradeJournalEntry).where(
+        # "new" and double-counted premiums on the Performance page. The amount is compared
+        # with a tolerance because Fidelity re-downloads round the same transaction
+        # differently by up to a cent.
+        candidates = db.execute(
+            select(TradeJournalEntry.credit_debit).where(
                 TradeJournalEntry.created_at == entry.created_at,
                 TradeJournalEntry.account_number == entry.account_number,
                 TradeJournalEntry.ticker == entry.ticker,
@@ -206,10 +213,10 @@ def _import_history_journal_entries(db: Session, entries) -> int:
                 TradeJournalEntry.contracts == entry.contracts,
                 TradeJournalEntry.strike == entry.strike,
                 TradeJournalEntry.expiration == entry.expiration,
-                TradeJournalEntry.credit_debit == entry.credit_debit,
             )
-        ).scalars().first()
-        if existing:
+        ).scalars().all()
+        new_amount = float(entry.credit_debit or 0.0)
+        if any(abs(float(amount or 0.0) - new_amount) <= AMOUNT_TOL for amount in candidates):
             continue
         db.add(entry)
         imported += 1

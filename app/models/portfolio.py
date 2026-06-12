@@ -7,6 +7,20 @@ from sqlalchemy.orm import relationship
 
 from app.database import Base
 
+POSITIONS_KIND = "fidelity_positions"
+HISTORY_KIND = "fidelity_history"
+
+
+def is_position_snapshot(snapshot) -> bool:
+    """True for snapshots from a positions export (real marked prices). History imports
+    aggregate transactions and carry stale last-trade prices, so they are kept for the journal
+    but must not drive NAV/dashboard numbers. New imports store the kind in notes; older rows
+    are classified by filename."""
+    notes = snapshot.notes or ""
+    if notes in (POSITIONS_KIND, HISTORY_KIND):
+        return notes == POSITIONS_KIND
+    return "history" not in (snapshot.source_filename or "").lower()
+
 
 class PortfolioSnapshot(Base):
     __tablename__ = "portfolio_snapshots"

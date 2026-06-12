@@ -198,7 +198,7 @@
       <div><span data-help="Recurring weekly premium from rolling the target sleeve on the nearest liquid weekly. Drives the SATA projection — it does not drop to $0 just because you are already covered this week.">Weekly premium (target sleeve)</span><strong>{{ premium_allocation.weekly_premium|money }}</strong></div>
       <div><span>&rarr; SATA</span><strong>{{ premium_allocation.amount_for("SATA")|money }}</strong></div>
       <div><span>&rarr; IBIT / ASST</span><strong>{{ (premium_allocation.amount_for("IBIT") + premium_allocation.amount_for("ASST"))|money }}</strong></div>
-      <div><span>Annualized pace</span><strong>{{ metrics.estimated_annual_premium|money }}</strong></div>
+      <div><span data-help="Annualized from the option premium actually collected in the trade journal (trailing window). Falls back to the modeled weekly premium x 52 when no trade history is imported.">Annualized pace (realized)</span><strong>{{ metrics.estimated_annual_premium|money }}</strong></div>
     </div>
     <div class="routing-projection">
       <span class="rp-label" data-help="SATA income sleeve projected with daily-compounding DRIP at the configured rate, tax-free in your IRA.">SATA with DRIP</span>

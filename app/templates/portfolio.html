@@ -4,11 +4,12 @@
 <section class="page-head">
   <div>
     <h1>Portfolio</h1>
-    <p>Full snapshot: holdings, option exposure, premium routing by account, SATA projection, and the Friday roll snapshot.</p>
+    <p>Full snapshot: holdings, option exposure, and the SATA projection. Trade actions live on This Week and Roll Decision; trade history and returns on Performance.</p>
   </div>
   <div class="actions">
     <a class="button" href="{{ base_path }}/">This Week</a>
-    <a class="button secondary" href="{{ base_path }}/performance">Historical Performance vs B&amp;H</a>
+    <a class="button secondary" href="{{ base_path }}/roll">Roll Decision</a>
+    <a class="button secondary" href="{{ base_path }}/performance">Performance</a>
     <a class="button secondary" href="{{ base_path }}/uploads">Upload Positions</a>
   </div>
 </section>
@@ -25,8 +26,8 @@
     <div><span data-help="Unsettled activity or pending account adjustments from the imported data.">Pending activity</span><strong>{{ metrics.pending_activity|money }}</strong></div>
     <div><span data-help="Current mark-to-market cost to close imported short option positions.">Open short-option liability</span><strong class="risk">{{ metrics.short_option_liability|money }}</strong></div>
     <div><span data-help="Current mark-to-market value of imported long option positions.">Long option value</span><strong>{{ metrics.long_option_value|money }}</strong></div>
-    <div><span data-help="Premium from the target roll/reset trades shown in the Friday Roll Snapshot.">Target roll premium</span><strong>{{ metrics.estimated_weekly_premium|money }}</strong></div>
-    <div><span data-help="Target roll premium multiplied by 52. This is a pace estimate, not a forecast.">Annualized target premium</span><strong>{{ metrics.estimated_annual_premium|money }}</strong></div>
+    <div><span data-help="Modeled premium from the target roll/reset trades on the Roll Decision page.">Target roll premium</span><strong>{{ metrics.estimated_weekly_premium|money }}</strong></div>
+    <div><span data-help="Annualized from the option premium actually collected in the trade journal (trailing window — full trade history is on the Performance page). Falls back to target roll premium x 52 only when no trade history has been imported.">Annualized premium (realized pace)</span><strong>{{ metrics.estimated_annual_premium|money }}</strong></div>
   </section>
 
   <section class="split">
@@ -62,61 +63,12 @@
   </section>
 
   <section>
-    <h2>Premium Routing</h2>
-    <div class="metric-grid">
-      <div><span data-help="Rule-based split for modeled option premium. SATA remains the income anchor; IBIT/ASST get a slice only when the current setup supports upside reinvestment.">Current routing</span><strong class="metric-text">{{ premium_allocation.summary }}</strong></div>
-      <div><span data-help="Modeled weekly option premium available to route from the Friday Roll Snapshot.">Weekly premium</span><strong>{{ premium_allocation.weekly_premium|money }}</strong></div>
-      <div><span data-help="Premium routed into SATA and used by the SATA projection below.">To SATA</span><strong>{{ premium_allocation.amount_for("SATA")|money }}</strong></div>
-      <div><span data-help="Premium routed back into IBIT and ASST for upside participation.">To upside stack</span><strong>{{ (premium_allocation.amount_for("IBIT") + premium_allocation.amount_for("ASST"))|money }}</strong></div>
-    </div>
-    <table>
-      <thead><tr><th data-help="Premium destination.">Destination</th><th data-help="Percent of modeled weekly premium.">Split</th><th data-help="Dollar amount using the current modeled weekly premium.">Weekly amount</th><th data-help="Why this destination receives premium under the current rule set.">Reason</th></tr></thead>
-      <tbody>
-        {% for leg in premium_allocation.legs %}
-          <tr>
-            <td>{{ leg.destination }}</td>
-            <td>{{ leg.percentage|pct }}</td>
-            <td>{{ leg.amount|money }}</td>
-            <td>{{ leg.reason }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <h3>Recommended Split By Account</h3>
-    <table>
-      <thead>
-        <tr>
-          <th data-help="Fidelity account from the latest import.">Account</th>
-          <th data-help="Modeled target roll premium assigned to this account from the account-level roll recommendation.">Modeled premium</th>
-          <th data-help="Dollar amount of this account's modeled premium routed into SATA.">To SATA</th>
-          <th data-help="Dollar amount of this account's modeled premium routed back into IBIT.">To IBIT</th>
-          <th data-help="Dollar amount of this account's modeled premium routed back into ASST.">To ASST</th>
-          <th data-help="Dollar amount held back as cash reserve when cash plus pending activity is negative.">Cash reserve</th>
-          <th data-help="Whether the account split came from exact account-level positions or journal-lot inference.">Basis</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for account_allocation in account_premium_allocations %}
-          <tr>
-            <td>{{ account_allocation.account.label }}</td>
-            <td>{{ account_allocation.weekly_premium|money }}</td>
-            <td>{{ account_allocation.amount_for("SATA")|money }}</td>
-            <td>{{ account_allocation.amount_for("IBIT")|money }}</td>
-            <td>{{ account_allocation.amount_for("ASST")|money }}</td>
-            <td>{{ account_allocation.amount_for("Cash reserve")|money }}</td>
-            <td>{{ account_allocation.basis }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="7">No account-level premium split is available yet.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </section>
-
-  <section>
     <h2>SATA Projection With DRIP</h2>
+    {% if projections %}
+      <p class="section-sub">Weekly contributions ({{ (projections[0].total_contributions / 52)|money }}/week) come from the realized premium pace routed at the current SATA split — premium routing lives on <a href="{{ base_path }}/">This Week</a>, trade history on <a href="{{ base_path }}/performance">Performance</a>.</p>
+    {% endif %}
     <table>
-      <thead><tr><th data-help="Projection period.">Horizon</th><th data-help="Estimated SATA ending value using the current assumptions.">Projected value</th><th data-help="Modeled option premium routed into SATA.">Contributions</th><th data-help="Modeled compounding from the SATA dividend assumption.">Dividend growth</th><th data-help="Projected annual income at the configured SATA rate.">Estimated annual income</th></tr></thead>
+      <thead><tr><th data-help="Projection period.">Horizon</th><th data-help="Estimated SATA ending value using the current assumptions.">Projected value</th><th data-help="Option premium routed into SATA, paced from realized journal premiums when history exists.">Contributions</th><th data-help="Modeled compounding from the SATA dividend assumption.">Dividend growth</th><th data-help="Projected annual income at the configured SATA rate.">Estimated annual income</th></tr></thead>
       <tbody>
         {% for projection in projections %}
           <tr>
@@ -131,41 +83,5 @@
     </table>
   </section>
 
-  <section>
-    <h2>Friday Roll Snapshot</h2>
-    <table>
-      <thead>
-        <tr>
-          <th data-help="Underlying being evaluated.">Symbol</th>
-          <th data-help="Rule-based read of the current technical setup.">Pattern</th>
-          <th data-help="Recommended percent of shares to cover if resetting the sleeve now.">Target coverage</th>
-          <th data-help="Target trade if the sleeve were reset to the recommended coverage.">Roll/reset trade</th>
-          <th data-help="Days to expiration for the selected weekly contract.">DTE</th>
-          <th data-help="Estimated premium from the target roll/reset trade.">Credit</th>
-          <th data-help="How much is already covered by imported short calls.">Current covered</th>
-          <th data-help="Whether to add more calls right now, after considering current coverage.">Current add-on</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in roll_rows %}
-          <tr>
-            <td>{{ row.symbol }}</td>
-            <td>{{ row.posture.label }} / {{ row.trend_state }}</td>
-            <td>{{ row.posture.coverage_pct|pct }}</td>
-            <td>{{ action_label(row.selected) }}</td>
-            <td>{{ row.chosen_dte or "-" }} days</td>
-            <td>{{ row.selected.expected_credit|money }}</td>
-            <td>{{ row.current_covered_pct|pct }} / {{ row.existing_short_calls }} calls</td>
-            <td>{{ row.current_add_on.action }}</td>
-          </tr>
-        {% else %}
-          <tr><td colspan="8">No roll decision available. Check provider configuration or upload positions.</td></tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    <div class="actions section-actions">
-      <a class="button secondary" href="{{ base_path }}/roll">Open Roll Decision</a>
-    </div>
-  </section>
 {% endif %}
 {% endblock %}

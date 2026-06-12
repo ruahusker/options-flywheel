@@ -1,11 +1,11 @@
 """Realized performance tracking: strategy net worth (incl. premiums/SATA) vs buy-and-hold counterfactual.
 
 Uses the sequence of imported PortfolioSnapshots as checkpoints. For a chosen period,
-computes a B&H benchmark as: the IBIT/ASST share counts from the *start* of the period,
-marked to market at the prices prevailing at each later checkpoint, plus the sidecar value
-(SATA + cash effects) from the start (i.e. without the benefit of option premiums collected
-during the period). This highlights the actual economic difference attributable to the
-covered-call / flywheel activity.
+computes a B&H benchmark as: the share counts of the marked risky symbols (BNH_MARKED_SYMBOLS)
+from the *start* of the period, marked to market at the prices prevailing at each later
+checkpoint, plus the sidecar value (SATA + cash effects) from the start (i.e. without the
+benefit of option premiums collected during the period). This highlights the actual economic
+difference attributable to the covered-call / flywheel activity.
 """
 
 from __future__ import annotations
@@ -18,9 +18,32 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.orm import Session
 
 from app.models.journal import TradeJournalEntry
-from app.models.portfolio import PortfolioSnapshot
+from app.models.portfolio import PortfolioSnapshot, is_position_snapshot
 from app.routers.common import snapshot_parts
 from app.services.risk_engine import DashboardMetrics, calculate_dashboard_metrics
+
+# Risky long positions marked to market in the B&H benchmark. Everything else in the
+# start snapshot (SATA, cash, option effects) is held as a flat sidecar.
+BNH_MARKED_SYMBOLS = ("IBIT", "ASST", "BTCFX", "BSOL")
+
+
+def _checkpoint_snapshots(db: Session) -> list[PortfolioSnapshot]:
+    """Snapshots usable as NAV checkpoints, oldest first. History-derived snapshots are excluded
+    (their prices are stale transaction prints, which distorts both the strategy line and the
+    B&H marks), as is the bundled sample-data import. When the same file was imported more than
+    once on the same day, only the newest import survives — the earlier one was a partial or
+    superseded upload."""
+    snaps = db.execute(select(PortfolioSnapshot).order_by(PortfolioSnapshot.created_at)).scalars().all()
+    usable = [
+        s
+        for s in snaps
+        if is_position_snapshot(s) and "sample" not in (s.source_filename or "").lower()
+    ]
+    newest_per_upload = {}
+    for s in usable:
+        newest_per_upload[(s.source_filename, s.created_at.date())] = s
+    keep = {s.id for s in newest_per_upload.values()}
+    return [s for s in usable if s.id in keep]
 
 
 @dataclass
@@ -32,14 +55,8 @@ class PerformanceResult:
 
 
 def list_available_snapshots(db: Session) -> list[dict[str, Any]]:
-    """Return lightweight list of snapshots for UI selectors (oldest first so start/end selects read naturally)."""
-    snaps = (
-        db.execute(
-            select(PortfolioSnapshot).order_by(PortfolioSnapshot.created_at)
-        )
-        .scalars()
-        .all()
-    )
+    """Return lightweight list of checkpoint-usable snapshots (oldest first)."""
+    snaps = _checkpoint_snapshots(db)
     out = []
     for s in snaps:
         out.append(
@@ -90,12 +107,8 @@ def compute_performance(
     """
     warnings: list[str] = []
 
-    # Load ordered snapshots (oldest -> newest) for the full history first
-    all_snaps = (
-        db.execute(select(PortfolioSnapshot).order_by(PortfolioSnapshot.created_at))
-        .scalars()
-        .all()
-    )
+    # Load ordered checkpoint snapshots (oldest -> newest) for the full history first
+    all_snaps = _checkpoint_snapshots(db)
     if not all_snaps:
         return PerformanceResult(
             checkpoints=[],
@@ -124,8 +137,8 @@ def compute_performance(
     base_metrics: DashboardMetrics | None = None
     base_risky_value = 0.0
     base_sidecar = 0.0
-    base_ibit_shares = 0.0
-    base_asst_shares = 0.0
+    base_shares: dict[str, float] = {sym: 0.0 for sym in BNH_MARKED_SYMBOLS}
+    last_marks: dict[str, float] = {}
 
     for idx, snap in enumerate(period_snaps):
         holdings, options, cash = snapshot_parts(db, snap)
@@ -135,6 +148,17 @@ def compute_performance(
         asst_price = _price_for_symbol(holdings, "ASST")
         ibit_shares = metrics.shares_by_symbol.get("IBIT", 0.0)
         asst_shares = metrics.shares_by_symbol.get("ASST", 0.0)
+
+        # Refresh B&H marks; a symbol absent from a later snapshot (sold in the real
+        # account) keeps its last seen price rather than collapsing to zero.
+        for sym in BNH_MARKED_SYMBOLS:
+            price = _price_for_symbol(holdings, sym)
+            if price <= 0:
+                shares = metrics.shares_by_symbol.get(sym, 0.0)
+                value = metrics.values_by_symbol.get(sym, 0.0)
+                price = value / shares if shares else 0.0
+            if price > 0:
+                last_marks[sym] = price
         short_calls = _short_calls(options)
         short_puts = _short_puts(options)
 
@@ -157,18 +181,15 @@ def compute_performance(
         # On first (start) of the chosen period, capture the B&H base
         if idx == 0:
             base_metrics = metrics
-            base_ibit_shares = ibit_shares
-            base_asst_shares = asst_shares
-            risky_value = (
-                metrics.values_by_symbol.get("IBIT", 0.0) + metrics.values_by_symbol.get("ASST", 0.0)
-            )
+            base_shares = {sym: metrics.shares_by_symbol.get(sym, 0.0) for sym in BNH_MARKED_SYMBOLS}
+            risky_value = sum(metrics.values_by_symbol.get(sym, 0.0) for sym in BNH_MARKED_SYMBOLS)
             base_risky_value = risky_value
             # Sidecar at start: everything in true_strategy_value except the current risky long value.
             # This keeps initial option MTM effects, initial SATA, cash, etc.
             base_sidecar = metrics.true_strategy_value - risky_value
 
         # B&H at this checkpoint's prices (fixed base shares + fixed start sidecar, no options)
-        bnh_risky = (base_ibit_shares * ibit_price) + (base_asst_shares * asst_price)
+        bnh_risky = sum(base_shares.get(sym, 0.0) * last_marks.get(sym, 0.0) for sym in BNH_MARKED_SYMBOLS)
         bnh_value = bnh_risky + base_sidecar
         strategy_val = cp["strategy_value"]
         diff = strategy_val - bnh_value
@@ -214,9 +235,10 @@ def compute_performance(
             "outperformance_vs_bnh": round(outperformance, 2),
             "start_diff": start_cp["diff"],
             "end_diff": end_cp["diff"],
-            "base_ibit_shares": round(base_ibit_shares, 2),
-            "base_asst_shares": round(base_asst_shares, 2),
-            "note": "B&H holds the starting IBIT/ASST share counts (from the period start snapshot) at the prices seen in each checkpoint, plus the starting sidecar value (SATA/cash/option effects) with no additional premiums. New capital added after the start is not included in this B&H figure.",
+            "base_ibit_shares": round(base_shares.get("IBIT", 0.0), 2),
+            "base_asst_shares": round(base_shares.get("ASST", 0.0), 2),
+            "bnh_base_shares": {sym: round(qty, 2) for sym, qty in base_shares.items()},
+            "note": "B&H holds the starting share counts of " + "/".join(BNH_MARKED_SYMBOLS) + " (from the period start snapshot) at the prices seen in each checkpoint, plus the starting sidecar value (SATA/cash/option effects) with no additional premiums. Symbols sold during the period keep their last seen price. New capital added after the start is not included in this B&H figure.",
         }
     else:
         summary = {"error": "Insufficient snapshots in selected range."}

@@ -31,6 +31,7 @@ from app.services.market_data.base import MarketDataProvider
 from app.services.market_data.cached_provider import latest_refresh_at
 from app.services.monte_carlo import run_monte_carlo
 from app.services.premium_allocation import build_account_premium_allocations, build_premium_allocation
+from app.services.premium_history import build_realized_premium_stats
 from app.services.recommendation_engine import generate_recommendation
 from app.services.risk_engine import calculate_dashboard_metrics
 from app.services.roll_decision import build_roll_decision_rows
@@ -53,6 +54,16 @@ def _detach(obj):
     except Exception:
         return obj
     return SimpleNamespace(**cols)
+
+
+def _sata_weekly_contribution(realized, premium_allocation) -> float:
+    """Weekly dollars the SATA projection should compound: the realized premium pace routed at the
+    allocation plan's SATA percentage, falling back to the modeled SATA amount when the journal has
+    no usable history."""
+    if realized.has_data and realized.projection_weekly > 0:
+        sata_pct = sum(leg.percentage for leg in premium_allocation.legs if leg.destination.upper() == "SATA")
+        return realized.projection_weekly * sata_pct
+    return premium_allocation.amount_for("SATA")
 
 
 def _actual_optioned_pct(metrics) -> float:
@@ -89,12 +100,17 @@ def build_week(db: Session, provider: MarketDataProvider) -> dict:
 
     weekly_premium = sum(row.recurring_weekly_premium for row in rows)
     metrics.estimated_weekly_premium = weekly_premium
-    metrics.estimated_annual_premium = weekly_premium * 52
+    realized_premium = build_realized_premium_stats(db)
+    # Annualize from actual journal premiums when history exists; the modeled weekly x 52 is only
+    # the cold-start fallback.
+    metrics.estimated_annual_premium = (
+        realized_premium.projection_annualized if realized_premium.has_data else weekly_premium * 52
+    )
     premium_allocation = build_premium_allocation(metrics, rows)
     account_premium_allocations = build_account_premium_allocations(premium_allocation, account_rows)
     projections = project_multiple_horizons(
         initial_value=metrics.sata_value,
-        weekly_contribution=premium_allocation.amount_for("SATA"),
+        weekly_contribution=_sata_weekly_contribution(realized_premium, premium_allocation),
         annual_rate=sata_settings.annual_dividend_rate,
         drip_enabled=sata_settings.drip_enabled,
         assumed_price=sata_settings.assumed_price,
@@ -108,6 +124,7 @@ def build_week(db: Session, provider: MarketDataProvider) -> dict:
         "premium_allocation": premium_allocation,
         "account_premium_allocations": account_premium_allocations,
         "projections": projections,
+        "realized_premium": realized_premium,
         "sata_settings": _detach(sata_settings),
         "warnings": metrics.warnings + roll_warnings + account_warnings,
     }
@@ -138,17 +155,17 @@ def build_portfolio(db: Session, provider: MarketDataProvider) -> dict:
     provider_warnings: list[str] = []
     roll_rows, roll_warnings = build_roll_decision_rows(metrics, options, provider, db)
     provider_warnings.extend(roll_warnings)
-    account_rows, account_warnings = build_account_roll_recommendations(db, roll_rows, holdings, options)
-    provider_warnings.extend(account_warnings)
 
     weekly_premium = sum(row.recurring_weekly_premium for row in roll_rows)
     metrics.estimated_weekly_premium = weekly_premium
-    metrics.estimated_annual_premium = weekly_premium * 52
+    realized_premium = build_realized_premium_stats(db)
+    metrics.estimated_annual_premium = (
+        realized_premium.projection_annualized if realized_premium.has_data else weekly_premium * 52
+    )
     premium_allocation = build_premium_allocation(metrics, roll_rows)
-    account_premium_allocations = build_account_premium_allocations(premium_allocation, account_rows)
     projections = project_multiple_horizons(
         initial_value=metrics.sata_value,
-        weekly_contribution=premium_allocation.amount_for("SATA"),
+        weekly_contribution=_sata_weekly_contribution(realized_premium, premium_allocation),
         annual_rate=sata_settings.annual_dividend_rate,
         drip_enabled=sata_settings.drip_enabled,
         assumed_price=sata_settings.assumed_price,
@@ -158,9 +175,6 @@ def build_portfolio(db: Session, provider: MarketDataProvider) -> dict:
     return {
         "snapshot": _detach(snapshot),
         "metrics": metrics,
-        "roll_rows": roll_rows,
-        "premium_allocation": premium_allocation,
-        "account_premium_allocations": account_premium_allocations,
         "projections": projections,
         "warnings": metrics.warnings + provider_warnings,
     }
@@ -359,7 +373,7 @@ def _snapshot_id(page: str, db: Session) -> int:
 
 # Bump whenever a payload dataclass gains fields the templates rely on: old pickles unpickle
 # cleanly but without the new attributes, which would 500 the page. A mismatch is a cache miss.
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 5
 
 
 def store(db: Session, page: str, snapshot_id: int, payload: dict, market_refreshed_at: datetime | None) -> None:
